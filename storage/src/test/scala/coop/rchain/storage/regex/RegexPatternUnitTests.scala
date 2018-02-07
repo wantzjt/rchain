@@ -468,8 +468,8 @@ class RegexPatternUnitTests extends FlatSpec with Matchers {
   }
 
   "CharClassPattern toString" should "work on all patterns" in {
-    assert(CharClassPattern.parse("[\\t\\r\\n]").get.toString == "[\\n\\t\\r]")
-    assert(CharClassPattern.parse("[^\\t\\r\\n]").get.toString == "[^\\n\\t\\r]")
+    assert(CharClassPattern.parse("[\\t\\r\\n]").get.toString == "[\\t\\n\\r]")
+    assert(CharClassPattern.parse("[^\\t\\r\\n]").get.toString == "[^\\t\\n\\r]")
 
     assert(CharClassPattern.parse("[\\t]").get.toString == "\\t")
     assert(CharClassPattern.parse("[^\\t]").get.toString == "[^\\t]")
@@ -505,5 +505,20 @@ class RegexPatternUnitTests extends FlatSpec with Matchers {
     assert(CharClassPattern.parse("\\xFF").get.toString == "\\xFF")
     //empty set (no match)
     assert(CharClassPattern(Nil).toString == "")
+  }
+
+  "toString" should "work on simple patterns" in {
+    assert(RegexPattern.parse("a[b]+|c*").get.toString == "ab+|c*")
+    assert(RegexPattern.parse("a[bc]+|b*").get.toString == "a[bc]+|b*")
+    assert(RegexPattern.parse("a?").get.toString == "a?")
+    assert(RegexPattern.parse("a*").get.toString == "a*")
+    assert(RegexPattern.parse("a|b").get.toString == "a|b")
+    assert(RegexPattern.parse("a|b*").get.toString == "a|b*")
+    assert(RegexPattern.parse("[ab]{2,}").get.toString == "[ab]{2,}")
+    assert(RegexPattern.parse("[bca]{4,5}").get.toString == "[abc]{4,5}")
+    assert(RegexPattern.parse("a.b").get.toString == "a.b")
+    assert(RegexPattern.parse("\\d{4}").get.toString == "\\d{4}")
+    assert(RegexPattern.parse("()").get.toString == "()")
+    assert(RegexPattern.parse("a.b()()").get.toString == "a.b()()")
   }
 }
