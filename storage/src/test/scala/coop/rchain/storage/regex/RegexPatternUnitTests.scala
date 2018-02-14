@@ -213,8 +213,6 @@ class RegexPatternUnitTests extends FlatSpec with Matchers {
   "MultPattern common operation" should "work as expected" in {
     val aStar = MultPattern.parse("a*").get.asInstanceOf[MultPattern]
     val aPlus = MultPattern.parse("a+").get.asInstanceOf[MultPattern]
-    val aOne = MultPattern.parse("a").get.asInstanceOf[MultPattern]
-
     assert(aStar.common(aPlus) == aStar)
   }
 
@@ -369,7 +367,6 @@ class RegexPatternUnitTests extends FlatSpec with Matchers {
     val aOrB = AltPattern(CharClassPattern("a"), CharClassPattern("b"))
     val bOrA = AltPattern(CharClassPattern("b"), CharClassPattern("a"))
 
-    assert(aOrB.reversed == aOrB)
     assert(aOrB.reversed == bOrA)
     assert(aOrB.reversed == bOrA.reversed)
 
@@ -520,5 +517,100 @@ class RegexPatternUnitTests extends FlatSpec with Matchers {
     assert(RegexPattern.parse("\\d{4}").get.toString == "\\d{4}")
     assert(RegexPattern.parse("()").get.toString == "()")
     assert(RegexPattern.parse("a.b()()").get.toString == "a.b()()")
+  }
+
+  "Lookahead simple cases" should "work" in {
+    assert(RegexPattern.parse("a(?=b)bc").get.matchIn("abc").get ==
+      Map(0 -> CaptureGroup(List(Capture("abc", 0)))))
+
+    assert(RegexPattern.parse("(a(?=b)b)c").get.matchIn("abc").get ==
+      Map(0 -> CaptureGroup(List(Capture("abc", 0)))))
+
+//    assert(RegexPattern.parse("(a(?=b)b)*c").get.matchIn("abc").get ==
+//      Map(0 -> CaptureGroup(List(Capture("abc", 0)))))
+  }
+
+  "Lookahead advanced cases" should "work" in {
+    assert(RegexPattern.parse("(a(?=b)bc(?=def).{3})+").get.matchIn("abcdef").get ==
+      Map(0 -> CaptureGroup(List(Capture("abc", 0)))))
+  }
+
+  "Caputer" should "simplest cases should work" in {
+    def dummyFunc(matchData: MatchData,
+                                        charIndex: Int): (MatchData, Option[Int]) =
+    {
+      (matchData, None)
+    }
+
+    val rxA = RegexPattern.parse("(a)").get
+    val fsm0 = rxA.toFsm()
+
+    val rxAGroupedStar = RegexPattern.parse("(a)*").get
+    val fsm1 = rxAGroupedStar.toFsm()
+
+    val rxAstarGrouped = RegexPattern.parse("(a*)").get
+    val fsm2 = rxAstarGrouped.toFsm()
+
+    assert(rxA.matchIn("a").get == Map(0 -> CaptureGroup(List(Capture("a", 0))),
+      1 -> CaptureGroup(List(Capture("a", 0)))))
+
+    assert(rxAGroupedStar.matchIn("aa").get == Map(0 -> CaptureGroup(List(Capture("aa", 0))),
+      1 -> CaptureGroup(List(Capture("a", 0), Capture("a", 1)))))
+
+    assert(rxAstarGrouped.matchIn("aaa").get == Map(0 -> CaptureGroup(List(Capture("aaa", 0))),
+      1 -> CaptureGroup(List(Capture("aaa", 0)))))
+
+
+//    val fsm1 = RegexPattern.parse("(a)*").get.toFsm()
+//    val fsm2 = RegexPattern.parse("(a)*b").get.toFsm()
+//
+//    val dg: (MatchData, Int) => (MatchData, Option[Int]) = dummyFunc
+//
+//    val fsm = RegexPattern.parse("abc").get.toFsm()
+//    val bState = fsm.transitions(fsm.initialState)('a')
+//    val actFsm = fsm.bindActions(StateAction(50, false, dg), StateAction(100, true, dg))
+//
+//    val revFsm = actFsm.reversed
+//    assert(revFsm.states.size == 4)
+//
+//    val revRevFsm = revFsm.reversed
+//    assert(revRevFsm.states.size == 4)
+  }
+
+  "Capture" should "work on simple patterns" in {
+		assert(RegexPattern.parse("a(b)c").get.matchIn("abc").get ==
+			Map(0 -> CaptureGroup(List(Capture("abc", 0))),
+				1 -> CaptureGroup(List(Capture("b", 1)))))
+
+    assert(RegexPattern.parse("a([-])c").get.matchIn("a-c").get ==
+      Map(0 -> CaptureGroup(List(Capture("a-c", 0))),
+        1 -> CaptureGroup(List(Capture("-", 1)))))
+  }
+
+  "Nested captures" should "work" in {
+//    assert(RegexPattern.parse("a((b))c").get.matchIn("abc").get ==
+//      Map(0 -> CaptureGroup(List(Capture("abc", 0))),
+//        1 -> CaptureGroup(List(Capture("b", 1))),
+//        2 -> CaptureGroup(List(Capture("b", 1)))))
+//
+//    assert(RegexPattern.parse("a(a*)a").get.accepts("aaa"))
+
+//    assert(RegexPattern.parse("a(a*)").get.matchIn("aaa").get ==
+//      Map(0 -> CaptureGroup(List(Capture("aaa", 0))),
+//        1 -> CaptureGroup(List(Capture("aa", 1)))))
+
+    assert(RegexPattern.parse("a(a)*").get.matchIn("aaa").get ==
+      Map(0 -> CaptureGroup(List(Capture("aaa", 0))),
+        1 -> CaptureGroup(List(Capture("aa", 1)))))
+
+//    assert(RegexPattern.parse("a(a*)a").get.matchIn("aaa").get ==
+//      Map(0 -> CaptureGroup(List(Capture("aaa", 0))),
+//              1 -> CaptureGroup(List(Capture("a", 1)))))
+
+//    assert(RegexPattern.parse("a(b(b)*b)c").get.matchIn("abbbbbbc").get ==
+//      Map(0 -> CaptureGroup(List(Capture("abbbbbbc", 0))),
+//        1 -> CaptureGroup(List(Capture("bbbbbb", 2))),
+//        2 -> CaptureGroup(List(Capture("b", 1), Capture("b", 2), Capture("b", 3),
+//          Capture("b", 4), Capture("b", 5), Capture("b", 6)))))
   }
 }
