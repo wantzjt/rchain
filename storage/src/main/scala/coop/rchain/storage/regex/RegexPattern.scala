@@ -9,6 +9,11 @@ case class Capture(value: String, index: Int) {
 
 case class CaptureGroup(captures: List[Capture])
 
+private[regex] trait StackedMatchData {
+  val input: String
+  val matchGroups: Map[MultPattern, Int]
+}
+
 private[regex] trait MatchData {
   val input: String
   val captures: Map[Int, CaptureGroup]
@@ -1025,7 +1030,7 @@ final case class MultPattern(multiplicand: RegexPattern,
       None
   }
 
-  private[this] def startCaptureGroup(matchData: MatchData,
+  private[this] def enterCaptureGroupFun(matchData: MatchData,
                                       charIndex: Int): (MatchData, Option[Int]) =
     if (matchData.isInstanceOf[PatternMatchData]) {
       val captureIndex = matchData.matchGroups(this)
@@ -1043,7 +1048,7 @@ final case class MultPattern(multiplicand: RegexPattern,
       (matchData, None)
     }
 
-  private[this] def endCaptureGroup(matchData: MatchData,
+  private[this] def completeCaptureGroupFun(matchData: MatchData,
                                     charIndex: Int): (MatchData, Option[Int]) =
     if (matchData.isInstanceOf[PatternMatchData]) {
       val captureIndex = matchData.matchGroups(this)
@@ -1070,16 +1075,30 @@ final case class MultPattern(multiplicand: RegexPattern,
       (matchData, None)
     }
 
-  lazy val enterCaptureGroup = StateAction(50, StateActionType.enterGroup, startCaptureGroup)
-  lazy val leaveCaptureGroup = StateAction(100, StateActionType.leaveGroup, endCaptureGroup)
-  lazy val cancelCaptureGroup = StateAction(200, StateActionType.cancelGroup, endCaptureGroup)
+  private[this] def cancelCaptureGroupFun(matchData: MatchData,
+                                       charIndex: Int): (MatchData, Option[Int]) =
+    if(matchData.isInstanceOf[PatternMatchData]) {
+      val captureIndex = matchData.matchGroups(this)
+      if (matchData.inProgress.contains(captureIndex)) {
+        (PatternMatchData(matchData.input, matchData.captures, matchData.inProgress - captureIndex, matchData.matchGroups),
+          None)
+      } else {
+        (matchData, None)
+      }
+    } else {
+      (matchData, None)
+    }
+
+  lazy val enterCaptureGroup = StateAction(50, StateActionType.enterGroup, enterCaptureGroupFun)
+  lazy val completeCaptureGroup = StateAction(100, StateActionType.completeGroup, completeCaptureGroupFun)
+  lazy val cancelCaptureGroup = StateAction(200, StateActionType.cancelGroup, cancelCaptureGroupFun)
 
   override def toFsm(alphabet: Option[Set[Char]]): Fsm = {
     val actualAlphabet = alphabet.getOrElse(this.alphabet)
 
     val startFsm = multiplicand.toFsm(actualAlphabet)
     val taggedStartFsm = if (kind == MultKind.capturing) {
-      startFsm.bindActions(enterCaptureGroup, leaveCaptureGroup, cancelCaptureGroup)
+      startFsm.bindActions(enterCaptureGroup, completeCaptureGroup, cancelCaptureGroup)
     } else {
       startFsm
     }

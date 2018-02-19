@@ -6,7 +6,7 @@ import scala.util.{Failure, Success, Try}
 
 
 private[regex] object StateActionType extends Enumeration {
-  val enterGroup, leaveGroup, cancelGroup = Value
+  val enterGroup, completeGroup, cancelGroup = Value
 }
 
 /**
