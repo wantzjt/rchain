@@ -374,10 +374,11 @@ class FsmUnitTests extends FlatSpec with Matchers {
     val fsmA  = createFsmA
     val starA = fsmA.star
 
+    assert(starA.accepts("aaaaaaaaa"))
+
     assert(starA.accepts(""))
     assert(starA.accepts("a"))
     assert(!starA.accepts("b"))
-    assert(starA.accepts("aaaaaaaaa"))
   }
 
   /**
