@@ -64,13 +64,14 @@ object Fsm {
   private[regex] def crawl[T](alphabet: Set[Char],
                               initial: T,
                               isFinal: T => Boolean,
-                              follow: (T, Char) => Option[T],
-                              migrateActions: T => List[StateAction]): Fsm = {
+                              follow: (T, Char) => Option[(T, List[StateAction])]): Fsm = {
     //actual type of the 'states' is deducted from 'initial' => ArrayBuffer[T]
-    val states      = mutable.ArrayBuffer(initial)
+    val states = mutable.ArrayBuffer(initial)
     val transitions = mutable.Map[Int, Map[Char, Int]]()
+    val transitionActions = mutable.Map[(Int, Int), List[StateAction]]()
 
     val sortedAlphabet = sortAlphabet(alphabet)
+
     //we can't use any kind of range loop or iterators here, since collection is growing
     @tailrec
     def iterate(currentStateIdx: Int = 0, currentFinals: Set[Int] = Set()): Set[Int] = {
@@ -84,15 +85,17 @@ object Fsm {
 
       val currentStateMap = sortedAlphabet
         .flatMap(symbol =>
-          follow(currentState, symbol).map(nextState => {
+          follow(currentState, symbol).map { case (nextState, nextActions) => {
             val nextStateIdx = states.indexOf(nextState)
             symbol -> (if (nextStateIdx < 0) {
-                         states += nextState
-                         states.size - 1
-                       } else {
-                         nextStateIdx
-                       })
-          }))
+              transitionActions += (currentStateIdx, states.size - 1) -> nextActions
+              states += nextState
+              states.size - 1
+            } else {
+              nextStateIdx
+            })
+          }
+          })
         .toMap
 
       transitions += currentStateIdx -> currentStateMap
@@ -104,12 +107,7 @@ object Fsm {
     }
 
     val iterateFinals = iterate()
-    val actions = states.zipWithIndex
-      .map { case (state, index) => index -> migrateActions(state) }
-      .filter(_._2.nonEmpty)
-      .toMap
-
-    Fsm(alphabet, states.indices.toSet, 0, iterateFinals, transitions.toMap, actions)
+    Fsm(alphabet, states.indices.toSet, 0, iterateFinals, transitions.toMap, transitionActions.toMap)
   }
 
   /**
@@ -124,7 +122,7 @@ object Fsm {
       case (fsm, fsmIndex) => fsmIndex -> fsm.initialState
     }.toMap
 
-    def follow(currentState: Map[Int, Int], symbol: Char): Option[Map[Int, Int]] = {
+    def follow(currentState: Map[Int, Int], symbol: Char): Option[(Map[Int, Int], List[StateAction])] = {
       val next = fsms.zipWithIndex.flatMap {
         case (fsm, fsmIdx) =>
           currentState
@@ -449,14 +447,14 @@ case class Fsm(alphabet: Set[Char],
         nextState(currentState, sym) match {
           case None =>
             //Current state doesn't exist, transition to dead state, FSM is Null or similar
-            (matchData, charIndex + 1, None)
+            (matchData, charIndex, None)
           case Some(nextState) =>
             //we're leaving current state, let's process leave actions
             val (leaveMatchData, leaveDiff) = processActions(
               matchData,
               charIndex,
               0,
-              boundActions.getOrElse(currentState, Nil).filter(_.isLeave).sorted(Fsm.actionsOrdering))
+              boundActions.getOrElse((currentState, nextState), Nil).sorted(Fsm.actionsOrdering))
 
             acceptChar(nextState, leaveMatchData, charIndex + leaveDiff + 1)
         }
@@ -466,7 +464,7 @@ case class Fsm(alphabet: Set[Char],
           matchData,
           charIndex,
           0,
-          boundActions.getOrElse(currentState, Nil).filter(_.isLeave).sorted(Fsm.actionsOrdering))
+          boundActions.getOrElse((currentState, -1), Nil).sorted(Fsm.actionsOrdering))
 
         (leaveMatchData, charIndex + leaveDiff, Some(currentState))
       }
@@ -529,8 +527,11 @@ case class Fsm(alphabet: Set[Char],
     //A state-set is final if the initial state is in it.
     def isFinal(statesSet: Set[Int]): Boolean = statesSet.contains(initialState)
 
-    def migrateActions(statesSet: Set[Int]): List[StateAction] =
+    def migrateActions(srcStates: Set[Int], dstStates: Set[Int]): List[StateAction] = {
+
+
       statesSet.flatMap(boundActions.get).flatten.toList
+    }
 
     //run crawl, and do not reduce() the result, since reduce() calls us in turn
     Fsm.crawl(resAlphabet, resInitials, isFinal, follow, migrateActions)
@@ -555,7 +556,7 @@ case class Fsm(alphabet: Set[Char],
     def isFinal(statesSet: List[Int]): Boolean =
       !statesSet.headOption.exists(x => finalStates.contains(x))
     //new Fsm will not accept anything from existing one, so no states will propagate
-    def migrateActions(statesSet: List[Int]): List[StateAction] = Nil
+    def migrateActions(statesSetCurrent: List[Int], statesSetNext: List[Int]): List[StateAction] = Nil
     Fsm.crawl(alphabet, resInitial, isFinal, follow, migrateActions).reduced
   }
 
@@ -649,8 +650,10 @@ case class Fsm(alphabet: Set[Char],
           case (fsmState, iteration) =>
             nextState(fsmState, symbol).map(subState =>
               if (finalStates.contains(subState)) {
+                boundAction(fsmState, subState) + boundAction(subState, -1)
                 List(subState -> iteration, initialState -> (iteration + 1))
               } else {
+                boundAction(fsmState, subState)
                 List(subState -> iteration)
             })
         }
@@ -689,9 +692,13 @@ case class Fsm(alphabet: Set[Char],
       val next = subStates
         .flatMap(subState =>
           if (finalStates.contains(subState)) {
+            val nxt = nextState(subState, symbol)
+            boundAction(subState, nxt) + boundAction(subState, -1)
             List(nextState(subState, symbol), nextState(initialState, symbol))
           } else {
-            List(nextState(subState, symbol))
+            val nxt = nextState(subState, symbol)
+            boundAction(subState, nxt)
+            List(nxt)
         })
         .flatten
 
@@ -701,8 +708,11 @@ case class Fsm(alphabet: Set[Char],
     def isFinal(subStates: Set[Int]): Boolean =
       subStates.exists(subState => finalStates.contains(subState))
 
-    def migrateActions(subStates: Set[Int]): List[StateAction] =
+    def migrateActions(subStatesCurrent: Set[Int], subStatesNext: Set[Int]): List[StateAction] = {
+
+
       subStates.toList.flatMap(boundActions.get).flatten
+    }
 
     Fsm.crawl(alphabet, Set(initialState), isFinal, follow, migrateActions) | Fsm
       .epsilonFsm(alphabet)

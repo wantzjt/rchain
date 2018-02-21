@@ -7,29 +7,29 @@ case class Capture(value: String, index: Int) {
   def length: Int = value.length
 }
 
-case class CaptureGroup(captures: List[Capture])
+case class PendingCapture(index: Int, rollBack: MatchData)
 
-private[regex] trait StackedMatchData {
-  val input: String
-  val matchGroups: Map[MultPattern, Int]
-}
+case class CaptureGroup(captures: List[Capture])
 
 private[regex] trait MatchData {
   val input: String
+  var version: Int
   val captures: Map[Int, CaptureGroup]
-  val inProgress: Map[Int, Capture]
+  val inProgress: Map[Int, PendingCapture]
   val matchGroups: Map[MultPattern, Int]
 }
 
 private[regex] case class EmptyMatchData(input: String) extends MatchData {
+  val version: Int = 0
   val captures: Map[Int, CaptureGroup]   = Map()
-  val inProgress: Map[Int, Capture]      = Map()
+  val inProgress: Map[Int, PendingCapture]      = Map()
   val matchGroups: Map[MultPattern, Int] = Map()
 }
 
 private[regex] case class PatternMatchData(input: String,
+                                           version: Int,
                                            captures: Map[Int, CaptureGroup],
-                                           inProgress: Map[Int, Capture],
+                                           inProgress: Map[Int, PendingCapture],
                                            matchGroups: Map[MultPattern, Int])
     extends MatchData
 
@@ -233,7 +233,7 @@ sealed abstract class RegexPattern {
 
   def matchIn(input: String): Option[Map[Int, CaptureGroup]] = {
     val (matchData, endIndex, endState) =
-      matchFsm.matchIn(PatternMatchData(input, Map(), Map(), matchGroups))
+      matchFsm.matchIn(PatternMatchData(input, 0, Map(), Map(), matchGroups))
     if (endState.exists(matchFsm.finalStates) && (endIndex == input.length)) {
       val md = matchData.asInstanceOf[PatternMatchData]
       Some(md.captures + (0 -> CaptureGroup(List(Capture(input, 0)))))
@@ -1040,8 +1040,9 @@ final case class MultPattern(multiplicand: RegexPattern,
       }
 
       (PatternMatchData(matchData.input,
+                        matchData.version + 1,
                         matchData.captures,
-                        matchData.inProgress + (captureIndex -> Capture("<>", charIndex)),
+                        matchData.inProgress + (captureIndex -> PendingCapture(charIndex, matchData)),
                         matchData.matchGroups),
        None)
     } else {
@@ -1064,6 +1065,7 @@ final case class MultPattern(multiplicand: RegexPattern,
           .getOrElse(CaptureGroup(List(capture)))
 
         (PatternMatchData(matchData.input,
+          matchData.version + 1,
           matchData.captures + (captureIndex -> newCaptureGroup),
           matchData.inProgress - captureIndex,
           matchData.matchGroups),
@@ -1079,12 +1081,13 @@ final case class MultPattern(multiplicand: RegexPattern,
                                        charIndex: Int): (MatchData, Option[Int]) =
     if(matchData.isInstanceOf[PatternMatchData]) {
       val captureIndex = matchData.matchGroups(this)
-      if (matchData.inProgress.contains(captureIndex)) {
-        (PatternMatchData(matchData.input, matchData.captures, matchData.inProgress - captureIndex, matchData.matchGroups),
-          None)
-      } else {
-        (matchData, None)
-      }
+      matchData.inProgress.get(captureIndex).map(pc => {
+        if(pc.rollBack.version < matchData.version) {
+          (pc.rollBack, None)
+        } else {
+          (matchData, None)
+        }
+      }).getOrElse((matchData, None))
     } else {
       (matchData, None)
     }
