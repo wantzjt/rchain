@@ -2,6 +2,10 @@ syntax = "proto3";
 
 option java_package = "coop.rchain.models";
 
+message BytesList {
+    repeated bytes values = 1;
+}
+
 message Par {
     repeated Send sends = 1;
     repeated Receive receives = 2;

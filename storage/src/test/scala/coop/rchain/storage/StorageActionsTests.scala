@@ -1,7 +1,10 @@
 package coop.rchain.storage
 
+import java.nio.file.Paths
+
 import cats.implicits._
 import com.typesafe.scalalogging.Logger
+import coop.rchain.models.{Serialize, SerializeInstances}
 import coop.rchain.storage.test._
 import coop.rchain.storage.test.implicits._
 import coop.rchain.storage.util.{ignore => ign}
@@ -465,3 +468,10 @@ class StorageActionsTests(createStore: () => IStore[String, Pattern, String, Lis
 class InMemoryStoreStorageActionsTests
     extends StorageActionsTests(
       () => InMemoryStore.create[String, Pattern, String, List[String] => Unit])
+
+class LMDBStoreStorageActionsTests
+    extends StorageActionsTests(
+      () =>
+        LMDBStore.create[String, Pattern, String, List[String] => Unit](Paths.get("D:\\!checklmdb"),
+                                                                        1024 * 1024 * 1024))
+    with SerializeInstances {}

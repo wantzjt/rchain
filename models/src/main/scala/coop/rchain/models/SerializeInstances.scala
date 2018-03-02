@@ -25,4 +25,6 @@ trait SerializeInstances {
   implicit object evalInstance     extends rhoInstanceWrapper(Eval)
   implicit object newInstance      extends rhoInstanceWrapper(New)
   implicit object exprInstance     extends rhoInstanceWrapper(Expr)
+
+  implicit object bytesListInstance extends rhoInstanceWrapper(BytesList)
 }
