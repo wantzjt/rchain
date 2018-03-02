@@ -491,6 +491,149 @@ class ProcMatcherSpec extends FlatSpec with Matchers {
       )))
     result.knownFree should be(inputs.knownFree)
   }
+
+  "PMatch" should "Handle a match inside a for comprehension" in {
+    // for (@x <- @Nil) { match x { case 42 => Nil ; case y => Nil } | @Nil!(47)
+    val listBindings = new ListName()
+    listBindings.add(new NameQuote(new PVar("x")))
+    val listLinearBinds = new ListLinearBind()
+    listLinearBinds.add(new LinearBindImpl(listBindings, new NameQuote(new PNil())))
+    val linearSimple = new LinearSimple(listLinearBinds)
+    val receipt      = new ReceiptLinear(linearSimple)
+
+    val listCases = new ListCase()
+    listCases.add(new CaseImpl(new PGround(new GroundInt(42)), new PNil()))
+    listCases.add(new CaseImpl(new PVar("y"), new PNil()))
+    val body = new PMatch(new PVar("x"), listCases)
+
+    val listData = new ListProc()
+    listData.add(new PGround(new GroundInt(47)))
+    val send47OnNil = new PSend(new NameQuote(new PNil()), new SendSingle(), listData)
+
+    val pPar = new PPar(
+      new PInput(receipt, body),
+      send47OnNil
+    )
+    val result    = ProcNormalizeMatcher.normalizeMatch(pPar, inputs)
+    val bindCount = 1
+    val freeCount = 0
+
+    val expectedResult =
+      inputs.par.copy(
+        sends = List(Send(Quote(Par()), List[Par](GInt(47)), false, 0)),
+        receives = List(
+          Receive(
+            List((List(Quote(EVar(FreeVar(0)))), Quote(Par()))),
+            Match(EVar(BoundVar(0)), List((GInt(42), Par()), (EVar(FreeVar(0)), Par())), 0),
+            false,
+            bindCount,
+            freeCount
+          ))
+      )
+    result.par should be(expectedResult)
+    result.knownFree should be(inputs.knownFree)
+  }
+
+  "PIf" should "Desugar to match with true/false cases" in {
+    // if (true) { @Nil!(47) }
+    val condition = new PGround(new GroundBool(new BoolTrue()))
+    val listSend  = new ListProc()
+    listSend.add(new PGround(new GroundInt(47)))
+    val body       = new PSend(new NameQuote(new PNil()), new SendSingle(), listSend)
+    val basicInput = new PIf(condition, body)
+    val freeCount = 0
+
+    val result = ProcNormalizeMatcher.normalizeMatch(basicInput, inputs)
+    result.par should be(
+      inputs.par.prepend(
+        Match(
+          GBool(true),
+          List((GBool(true), Send(Quote(Par()), List[Par](GInt(47)), false, 0)),
+               (GBool(false), Par())
+               // TODO: Fill in type error case
+          ),
+          freeCount
+        )))
+    result.knownFree should be(inputs.knownFree)
+  }
+  "PIfElse" should "Handle a more complicated if statement with an else clause" in {
+    // if (47 == 47) { new x in { x!(47) } } else { new y in { y!(47) } }
+    val condition = new PEq(new PGround(new GroundInt(47)), new PGround(new GroundInt(47)))
+    val xNameDecl = new ListNameDecl()
+    xNameDecl.add(new NameDeclSimpl("x"))
+    val xSendData = new ListProc()
+    xSendData.add(new PGround(new GroundInt(47)))
+    val pNewIf = new PNew(
+      xNameDecl,
+      new PSend(new NameVar("x"), new SendSingle(), xSendData)
+    )
+    val yNameDecl = new ListNameDecl()
+    yNameDecl.add(new NameDeclSimpl("y"))
+    val ySendData = new ListProc()
+    ySendData.add(new PGround(new GroundInt(47)))
+    val pNewElse = new PNew(
+      yNameDecl,
+      new PSend(new NameVar("y"), new SendSingle(), ySendData)
+    )
+    val basicInput = new PIfElse(condition, pNewIf, pNewElse)
+    val freeCount = 0
+
+    val result = ProcNormalizeMatcher.normalizeMatch(basicInput, inputs)
+    result.par should be(
+      inputs.par.prepend(Match(
+        EEq(GInt(47), GInt(47)),
+        List(
+          (GBool(true), New(1, Send(ChanVar(BoundVar(0)), List[Par](GInt(47)), false, 0))),
+          (GBool(false), New(1, Send(ChanVar(BoundVar(0)), List[Par](GInt(47)), false, 0)))
+          // TODO: Fill in type error case
+        ),
+        freeCount
+      )))
+    result.knownFree should be(inputs.knownFree)
+  }
+  "PMatch" should "Fail if a free variable is used twice in the target" in {
+    // match 47 { case (y | y) => Nil }
+    val listCases = new ListCase()
+    listCases.add(new CaseImpl(new PPar(new PVar("y"), new PVar("y")), new PNil()))
+    val pMatch = new PMatch(new PGround(new GroundInt(47)), listCases)
+
+    an[Error] should be thrownBy {
+      ProcNormalizeMatcher.normalizeMatch(pMatch, inputs)
+    }
+  }
+  "PMatch" should "Handle a match inside a for pattern" in {
+    // for (@{match {x | y} { 47 => Nil }} <- @Nil) { Nil }
+
+    val listCases = new ListCase()
+    listCases.add(new CaseImpl(new PGround(new GroundInt(47)), new PNil()))
+    val pMatch       = new PMatch(new PPar(new PVar("x"), new PVar("y")), listCases)
+    val listBindings = new ListName()
+    listBindings.add(new NameQuote(pMatch))
+    val listLinearBinds = new ListLinearBind()
+    listLinearBinds.add(new LinearBindImpl(listBindings, new NameQuote(new PNil())))
+    val linearSimple = new LinearSimple(listLinearBinds)
+    val receipt      = new ReceiptLinear(linearSimple)
+    var input        = new PInput(receipt, new PNil())
+
+    val result    = ProcNormalizeMatcher.normalizeMatch(input, inputs)
+    val bindCount = 2
+    val freeCount = 0
+
+    val matchTarget = Par(EVar(FreeVar(1))).prepend(EVar(FreeVar(0)))
+    val expectedResult =
+      inputs.par.copy(
+        receives = List(
+          Receive(
+            List((List(Quote(Match(matchTarget, List((GInt(47), Par())), 2))), Quote(Par()))),
+            Par(),
+            false,
+            bindCount,
+            freeCount
+          ))
+      )
+    result.par should be(expectedResult)
+    result.knownFree should be(inputs.knownFree)
+  }
 }
 
 class NameMatcherSpec extends FlatSpec with Matchers {
