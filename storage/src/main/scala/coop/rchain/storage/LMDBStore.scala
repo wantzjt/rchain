@@ -11,7 +11,9 @@ import cats.syntax.either._
 import coop.rchain.storage.util._
 import org.lmdbjava.DbiFlags.MDB_CREATE
 import org.lmdbjava.{Dbi, Env, EnvFlags, Txn}
-import coop.rchain.models.{BytesList, Serialize, SerializeInstances}
+import coop.rchain.models.{Serialize, SerializeInstances}
+import coop.rchain.storage.LMDBStore.{fromBB, hashBytes, toBB, toBL}
+import coop.rchain.storage.datamodels.BytesList
 
 class LMDBStore[C, P, A, K] private (env: Env[ByteBuffer],
                                      _dbKeys: Dbi[ByteBuffer],
@@ -27,23 +29,25 @@ class LMDBStore[C, P, A, K] private (env: Env[ByteBuffer],
 
   type H = ByteBuffer
 
+  implicit object bytesListInstance extends rhoInstanceWrapper(BytesList)
+
   private[storage] def hashC(packedCs: H): H =
-    LMDBStore.hashBytes(packedCs)
+    hashBytes(packedCs)
 
   private[storage] def hashC(c: C)(implicit serialize: Serialize[C]): H =
-    LMDBStore.hashBytes(serialize.encode(c))
+    hashBytes(serialize.encode(c))
 
   private[storage] def hashC(cs: List[C])(implicit serialize: Serialize[C]): H =
-    LMDBStore.hashBytes(LMDBStore.toBB(cs)(serialize))
+    hashBytes(toBB(cs)(serialize))
 
   private[storage] def getKey(txn: T, s: H): List[C] =
-    LMDBStore.fromBB[C](Option(_dbKeys.get(txn, s))).getOrElse(List.empty)
+    fromBB[C](Option(_dbKeys.get(txn, s))).getOrElse(List.empty)
 
   private[storage] def putCs(txn: T, channels: List[C]): Unit =
     putCsH(txn, channels)
 
   private[storage] def putCsH(txn: T, channels: List[C]): H = {
-    val packedCs = LMDBStore.toBB(channels)
+    val packedCs = toBB(channels)
     val hashCs   = hashC(packedCs)
     _dbKeys.put(txn, hashCs, packedCs)
     hashCs
@@ -70,71 +74,85 @@ class LMDBStore[C, P, A, K] private (env: Env[ByteBuffer],
 
   def putA(txn: T, channels: List[C], a: A): Unit = {
     val hashCs = putCsH(txn, channels)
-    val as     = LMDBStore.fromBB[A](Option(_dbAs.get(txn, hashCs))).getOrElse(List.empty)
-    _dbPs.put(txn, hashCs, LMDBStore.toBB(a :: as))
+    val as     = fromBB[A](Option(_dbAs.get(txn, hashCs))).getOrElse(List.empty)
+    _dbPs.put(txn, hashCs, toBB(a :: as))
   }
 
   def putK(txn: T, channels: List[C], patterns: List[P], k: K): Unit = {
     val hashCs = putCsH(txn, channels)
-    val ps     = LMDBStore.fromBB[P](Option(_dbPs.get(txn, hashCs))).getOrElse(List.empty)
-    _dbPs.put(txn, hashCs, LMDBStore.toBB(patterns ++ ps))
-    _dbK.put(txn, hashCs, LMDBStore.toBB(List(k)))
+    val ps     = fromBB[P](Option(_dbPs.get(txn, hashCs))).getOrElse(List.empty)
+    _dbPs.put(txn, hashCs, toBB(patterns ++ ps))
+    _dbK.put(txn, hashCs, toBB(List(k)))
   }
 
   def getPs(txn: T, channels: List[C]): List[P] = {
     val hashCs = hashC(channels)
-    LMDBStore.fromBB[P](Option(_dbPs.get(txn, hashCs))).getOrElse(List.empty)
+    fromBB[P](Option(_dbPs.get(txn, hashCs))).getOrElse(List.empty)
   }
 
   def getAs(txn: T, channels: List[C]): List[A] = {
     val hashCs = hashC(channels)
-    LMDBStore.fromBB[A](Option(_dbAs.get(txn, hashCs))).getOrElse(List.empty)
+    fromBB[A](Option(_dbAs.get(txn, hashCs))).getOrElse(List.empty)
   }
 
   def getK(txn: T, curr: List[C]): Option[(List[P], K)] = {
     val hashCs = hashC(curr)
     for {
-      ps <- LMDBStore.fromBB[P](Option(_dbPs.get(txn, hashCs)))
-      k  <- LMDBStore.fromBB[K](Option(_dbK.get(txn, hashCs))).flatMap(_.headOption)
+      ps <- fromBB[P](Option(_dbPs.get(txn, hashCs)))
+      k  <- fromBB[K](Option(_dbK.get(txn, hashCs))).flatMap(_.headOption)
     } yield (ps, k)
   }
 
   def removeA(txn: T, channels: List[C], index: Int): Unit = {
     val hashCs = hashC(channels)
-    for (as <- LMDBStore.fromBB[A](Option(_dbAs.get(txn, hashCs)))) {
+    for (as <- fromBB[A](Option(_dbAs.get(txn, hashCs)))) {
       val newAs = util.dropIndex(as, index)
-      _dbAs.put(txn, hashCs, LMDBStore.toBB(newAs))
+      _dbAs.put(txn, hashCs, toBB(newAs))
     }
   }
 
   def removeK(txn: T, channels: List[C], index: Int): Unit = {
     val hashCs = hashC(channels)
-    for (ps <- LMDBStore.fromBB[P](Option(_dbPs.get(txn, hashCs)))) {
+    for (ps <- fromBB[P](Option(_dbPs.get(txn, hashCs)))) {
       val newPs = util.dropIndex(ps, index)
-      _dbPs.put(txn, hashCs, LMDBStore.toBB(newPs))
+      _dbPs.put(txn, hashCs, toBB(newPs))
     }
     _dbK.delete(txn, hashCs)
   }
 
   def addJoin(txn: T, c: C, cs: List[C]): Unit = {
-//    val joinKey = hashC(c)
-//    val csKey   = putCsH(txn, cs)
-//    val oldCsList =
-//      LMDBStore.fromBB[BytesList](Option(_dbJoins.get(txn, joinKey))).getOrElse(List.empty)
-//    _dbJoins.put(txn, joinKey, LMDBStore.toBB(csKey :: oldCsList))
+    val joinKey = hashC(c)
+    val csKey   = toBL(cs)
+    val oldCsList =
+      fromBB[BytesList](Option(_dbJoins.get(txn, joinKey))).getOrElse(List.empty)
+    _dbJoins.put(txn, joinKey, toBB(csKey :: oldCsList))
   }
 
-  def getJoin(txn: T, c: C): List[List[C]] =
-//    val joinKey = hashC(c)
-//    val oldCsList = LMDBStore.fromBB[BytesList](Option(_dbJoins.get(txn, joinKey)))
-//    oldCsList.flatten.map(
-//
-//    )
-    throw new NotImplementedError("TODO")
+  def getJoin(txn: T, c: C): List[List[C]] = {
+    val joinKey   = hashC(c)
+    val oldCsList = fromBB[BytesList](Option(_dbJoins.get(txn, joinKey)))
+    oldCsList.getOrElse(Nil).flatMap(x => fromBB[C](Some(ByteBuffer.wrap(x.toByteArray))))
+  }
 
-  def removeJoin(txn: T, c: C, cs: List[C]): Unit = {}
+  def removeJoin(txn: T, c: C, cs: List[C]): Unit = {
+    val joinKey   = hashC(c)
+    val oldCsList = fromBB[BytesList](Option(_dbJoins.get(txn, joinKey)))
+    val exList =
+      oldCsList.getOrElse(Nil).flatMap(x => fromBB[C](Some(ByteBuffer.wrap(x.toByteArray))))
+    val idx = exList.indexOf(cs)
+    if (idx >= 0) {
+      val resList = dropIndex(exList, idx)
+      if (resList.nonEmpty)
+        _dbJoins.put(txn, joinKey, toBB(resList.map(toBL(_))))
+      else
+        _dbJoins.delete(txn, joinKey)
+    }
+  }
 
-  def removeAllJoins(txn: T, c: C): Unit = {}
+  def removeAllJoins(txn: T, c: C): Unit = {
+    val joinKey = hashC(c)
+    _dbJoins.delete(txn, joinKey)
+  }
 
   def close(): Unit = {
     _dbKeys.close()
@@ -185,10 +203,15 @@ object LMDBStore {
     new LMDBStore[C, P, A, K](env, dbKeys, dbPs, dbAs, dbK, dbJoins)
   }
 
+  private[storage] def toBL[TItem](values: List[TItem])(
+      implicit serialize: Serialize[TItem]): BytesList = {
+    val encoded = values.map(serialize.encode)
+    BytesList().withValues(encoded.map(ByteString.copyFrom))
+  }
+
   private[storage] def toBB[TItem](values: List[TItem])(
       implicit serialize: Serialize[TItem]): ByteBuffer = {
-    val encoded        = values.map(serialize.encode)
-    val bl             = BytesList().withValues(encoded.map(ByteString.copyFrom)).toByteArray
+    val bl             = toBL(values).toByteArray
     val bb: ByteBuffer = ByteBuffer.allocateDirect(bl.length)
     bb.put(bl).flip()
     bb
@@ -199,7 +222,7 @@ object LMDBStore {
     bytesOpt.map(bytes => {
       val fetched = new Array[Byte](bytes.remaining())
       ignore { bytes.get(fetched) }
-      val bl = BytesList.parseFrom(bytes.array)
+      val bl = BytesList.parseFrom(fetched)
       val x: Either[Throwable, List[TItem]] = bl.values
         .map(x => serialize.decode(x.toByteArray))
         .toList

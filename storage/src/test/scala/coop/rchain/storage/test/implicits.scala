@@ -1,18 +1,19 @@
 package coop.rchain.storage.test
 
 import java.nio.charset.StandardCharsets
+import java.util.UUID
 
 import coop.rchain.models.Serialize
 import coop.rchain.storage.Match
 
-object implicits {
+import scala.collection.mutable
 
+object implicits {
   implicit object stringMatch extends Match[Pattern, String] {
     def get(p: Pattern, a: String): Option[String] = Some(a).filter(p.isMatch)
   }
 
   implicit object stringSerialize extends Serialize[String] {
-
     def encode(a: String): Array[Byte] =
       a.getBytes(StandardCharsets.UTF_8)
 
@@ -20,19 +21,22 @@ object implicits {
       Right(new String(bytes, StandardCharsets.UTF_8))
   }
 
-  implicit object patternSerializeWrapper extends Serialize[Pattern] {
-    override def encode(a: Pattern): Array[Byte] =
-      throw new NotImplementedError("TODO")
+  implicit object patternSerializeWrapper    extends TestSerialize[Pattern]
+  implicit object stringListSerializeWrapper extends TestSerialize[List[String] => Unit]
 
-    override def decode(bytes: Array[Byte]): Either[Throwable, Pattern] =
-      throw new NotImplementedError("TODO")
-  }
+  class TestSerialize[T] extends Serialize[T] {
+    val actionsCache: mutable.Map[UUID, T] = mutable.Map()
 
-  implicit object stringListSerialize extends Serialize[List[String] => Unit] {
-    def encode(a: List[String] => Unit): Array[Byte] =
-      throw new NotImplementedError("TODO")
+    def encode(a: T): Array[Byte] = {
+      val uid = UUID.randomUUID()
+      actionsCache += uid -> a
+      uid.toString.getBytes(StandardCharsets.UTF_8)
+    }
 
-    def decode(bytes: Array[Byte]): Either[Throwable, List[String] => Unit] =
-      throw new NotImplementedError("TODO")
+    def decode(bytes: Array[Byte]): Either[Throwable, T] = {
+      val uidStr = new String(bytes, StandardCharsets.UTF_8)
+      val uid    = UUID.fromString(uidStr)
+      Right(actionsCache(uid))
+    }
   }
 }
