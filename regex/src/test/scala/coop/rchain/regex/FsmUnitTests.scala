@@ -1,12 +1,9 @@
 package coop.rchain.regex
+
+import coop.rchain.storage.util
 import org.scalatest.{FlatSpec, Matchers}
 
 class FsmUnitTests extends FlatSpec with Matchers {
-  def ignore[A](a: => A): Unit = {
-    val _: A = a
-    ()
-  }
-
   val _ob: Int = -5
 
   def createFsmA: Fsm = Fsm(
@@ -83,11 +80,11 @@ class FsmUnitTests extends FlatSpec with Matchers {
     val epsilonFsmAB = Fsm.epsilonFsm(Set('a', 'b'))
     assert(!epsilonFsmAB.isEmpty)
 
-    assert(Fsm(Set(), Set(0, 1), 0, Set(1), Map(0 -> Map(), 1 -> Map())).isEmpty)
+    assert(Fsm(Set(), Set(0, 1), 0, Set(1), Map(0 -> Map[Char, Int](), 1 -> Map[Char, Int]())).isEmpty)
 
-    assert(!Fsm(Set(), Set(0), 0, Set(0), Map(0 -> Map())).isEmpty)
+    assert(!Fsm(Set(), Set(0), 0, Set(0), Map(0 -> Map[Char, Int]())).isEmpty)
 
-    assert(Fsm(Set(), Set(0, 1), 1, Set(0), Map(0 -> Map())).isEmpty)
+    assert(Fsm(Set(), Set(0, 1), 1, Set(0), Map(0 -> Map[Char, Int]())).isEmpty)
 
     assert(
       Fsm(Set('a', 'b'),
@@ -119,10 +116,10 @@ class FsmUnitTests extends FlatSpec with Matchers {
     assert(!createFsmA.isEmpty)
     assert(!createFsmB.isEmpty)
 
-    val fsmE1 = Fsm(Set(), Set(0, 1), 0, Set(1), Map(0 -> Map(), 1 -> Map()))
+    val fsmE1 = Fsm(Set(), Set(0, 1), 0, Set(1), Map(0 -> Map[Char, Int](), 1 -> Map[Char, Int]()))
     assert(fsmE1.isEmpty)
 
-    val fsmE2 = Fsm(Set(), Set(0), 0, Set(0), Map(0 -> Map()))
+    val fsmE2 = Fsm(Set(), Set(0), 0, Set(0), Map(0 -> Map[Char, Int]()))
     assert(!fsmE2.isEmpty)
 
     val fsmE3 = Fsm(Set('a', 'b'),
@@ -377,10 +374,11 @@ class FsmUnitTests extends FlatSpec with Matchers {
     val fsmA  = createFsmA
     val starA = fsmA.star
 
+    assert(starA.accepts("aaaaaaaaa"))
+
     assert(starA.accepts(""))
     assert(starA.accepts("a"))
     assert(!starA.accepts("b"))
-    assert(starA.accepts("aaaaaaaaa"))
   }
 
   /**
@@ -770,25 +768,25 @@ class FsmUnitTests extends FlatSpec with Matchers {
 
   "Invalid Fsm" should "fail if alphabet null" in {
     assertThrows[IllegalArgumentException] {
-      ignore { Fsm(null, null, 0, null, null) }
+      _ = Fsm(null, null, 0, null, Map[Int, Map[Char, Transition]]())
     }
   }
 
   "Invalid Fsm" should "fail if initial state is not a state" in {
     assertThrows[IllegalArgumentException] {
-      ignore { Fsm(Set('a'), Set(0), 1, Set(0), Map()) }
+      _ = Fsm(Set('a'), Set(0), 1, Set(0), Map[Int, Map[Char, Transition]]())
     }
   }
 
   "Invalid Fsm" should "fail if final state is not a state" in {
     assertThrows[IllegalArgumentException] {
-      ignore { Fsm(Set('a'), Set(1), 1, Set(2), Map()) }
+      _ = Fsm(Set('a'), Set(1), 1, Set(2), Map[Int, Map[Char, Transition]]())
     }
   }
 
   "Invalid Fsm" should "fail if unexpected transition state detected" in {
     assertThrows[IllegalArgumentException] {
-      ignore { Fsm(Set('a'), Set(1, 2), 1, Set(2), Map(1 -> Map('a' -> 3))) }
+      _ = Fsm(Set('a'), Set(1, 2), 1, Set(2), Map(1 -> Map('a' -> 3)))
     }
   }
 }

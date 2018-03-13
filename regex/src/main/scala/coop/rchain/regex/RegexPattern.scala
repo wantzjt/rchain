@@ -3,6 +3,36 @@ package coop.rchain.regex
 import scala.annotation.tailrec
 import scala.util.Try
 
+case class Capture(value: String, index: Int) {
+  def length: Int = value.length
+}
+
+case class PendingCapture(index: Int, rollBack: MatchData)
+
+case class CaptureGroup(captures: List[Capture])
+
+private[regex] trait MatchData {
+  val input: String
+  val version: Int
+  val captures: Map[Int, CaptureGroup]
+  val inProgress: Map[Int, PendingCapture]
+  val matchGroups: Map[MultPattern, Int]
+}
+
+private[regex] case class EmptyMatchData(input: String) extends MatchData {
+  val version: Int                         = 0
+  val captures: Map[Int, CaptureGroup]     = Map()
+  val inProgress: Map[Int, PendingCapture] = Map()
+  val matchGroups: Map[MultPattern, Int]   = Map()
+}
+
+private[regex] case class PatternMatchData(input: String,
+                                           version: Int,
+                                           captures: Map[Int, CaptureGroup],
+                                           inProgress: Map[Int, PendingCapture],
+                                           matchGroups: Map[MultPattern, Int])
+    extends MatchData
+
 trait ParsedPattern {
 
   /**
@@ -61,8 +91,8 @@ sealed abstract class RegexPattern {
 
   /**
     * Two RegexPatterns are equivalent if they recognise the same strings. Note
-    *	that in the general case this is actually quite an intensive calculation,
-    *	but far from unsolvable, as we demonstrate here:
+    * that in the general case this is actually quite an intensive calculation,
+    * but far from unsolvable, as we demonstrate here:
     */
   def equivalent(that: RegexPattern): Boolean
 
@@ -97,12 +127,12 @@ sealed abstract class RegexPattern {
 
   /**
     * Intersection function. Return a RegexPattern that can match any string
-    *	that both self and other can match. Fairly elementary results relating
-    *	to regular languages and finite state machines show that this is
+    * that both self and other can match. Fairly elementary results relating
+    * to regular languages and finite state machines show that this is
     * possible, but implementation is a BEAST in many cases. Here, we convert
-    *	both Regex patters to FSMs (see to_fsm(), above) for the intersection, then
-    *	back to RegexPatterns afterwards.
-    *	Call using "a = b & c"
+    * both Regex patters to FSMs (see to_fsm(), above) for the intersection, then
+    * back to RegexPatterns afterwards.
+    * Call using "a = b & c"
     */
   def intersection(that: RegexPattern): RegexPattern
 
@@ -184,6 +214,33 @@ sealed abstract class RegexPattern {
   final def *(multiplier: Multiplier): MultPattern = multiply(multiplier)
 
   //endregion
+
+  protected[regex] def preOrderSequence: Iterator[RegexPattern]
+
+  private[this] lazy val matchFsm: Fsm = toFsm()
+
+  private[this] lazy val matchGroups: Map[MultPattern, Int] = {
+    val po = preOrderSequence.toList
+
+    po.filter {
+        case mp: MultPattern if mp.kind == MultKind.capturing => true
+        case _                                                => false
+      }
+      .zipWithIndex
+      .map { case (mp, idx) => mp.asInstanceOf[MultPattern] -> (idx + 1) }
+      .toMap
+  }
+
+  def matchIn(input: String): Option[Map[Int, CaptureGroup]] = {
+    val (matchData, endIndex, endState) =
+      matchFsm.matchIn(PatternMatchData(input, 0, Map(), Map(), matchGroups))
+    if (endState.exists(matchFsm.finalStates) && (endIndex == input.length)) {
+      val md = matchData.asInstanceOf[PatternMatchData]
+      Some(md.captures + (0 -> CaptureGroup(List(Capture(input, 0)))))
+    } else {
+      None
+    }
+  }
 }
 
 //we need 3 states to handle case [a-b-z], that means Set(a,b,-,z)
@@ -476,7 +533,7 @@ final case class CharClassPattern(charSet: Set[Char], negateCharSet: Boolean = f
         case 1     => singleCharToString(lst.head)
         case 2 | 3 =>
           //sequence like "abc", no sense to convert to "a-c"
-          lst.map(singleCharToString).mkString
+          lst.reverse.map(singleCharToString).mkString
         case _ =>
           //sequence of 4 chars or more "abcd" -> "a-d"
           val startChar = singleCharToString(lst.last)
@@ -627,6 +684,8 @@ final case class CharClassPattern(charSet: Set[Char], negateCharSet: Boolean = f
     * Returns RegexPattern.negated
     */
   def unary_~ : CharClassPattern = negated
+
+  override protected[regex] def preOrderSequence: Iterator[RegexPattern] = Iterator(this)
 }
 
 object ConcPattern extends ParsedPattern {
@@ -735,13 +794,19 @@ final case class ConcPattern(mults: List[MultPattern]) extends RegexPattern {
     */
   def common(that: ConcPattern, suffix: Boolean = false): ConcPattern =
     throw new NotImplementedError("TODO")
+
+  override def toString: String =
+    mults.mkString("")
+
+  override protected[regex] def preOrderSequence: Iterator[RegexPattern] =
+    Iterator(this) ++ mults.iterator.flatMap(_.preOrderSequence)
 }
 
 object AltPattern extends ParsedPattern {
-  def apply(pattern: ConcPattern): AltPattern        = new AltPattern(Set(pattern))
-  def apply(patterns: List[ConcPattern]): AltPattern = new AltPattern(patterns.toSet)
+  def apply(pattern: ConcPattern): AltPattern        = new AltPattern(List(pattern))
+  def apply(patterns: List[ConcPattern]): AltPattern = new AltPattern(patterns)
   def apply(patterns: CharClassPattern*): AltPattern =
-    new AltPattern(patterns.map(cp => ConcPattern(cp)).toSet)
+    new AltPattern(patterns.map(cp => ConcPattern(cp)).toList)
 
   def tryParse(str: CharSequence): Option[(AltPattern, Int)] = {
     @tailrec
@@ -764,7 +829,7 @@ object AltPattern extends ParsedPattern {
     val (seq, seqEndIndex) = parseRecursive(0, Nil)
 
     if (seq.nonEmpty) {
-      val altPattern = AltPattern(seq)
+      val altPattern = AltPattern(seq.reverse)
       Some(altPattern, seqEndIndex)
     } else {
       //nothing parsed, no characters eaten from input stream
@@ -786,14 +851,14 @@ object AltPattern extends ParsedPattern {
   * 1, a lower bound 1, and a multiplicand which is a new subpattern, "ghi|jkl".
   * This new subpattern again consists of two ConcPatterns: "ghi" and "jkl".
   */
-final case class AltPattern(concs: Set[ConcPattern]) extends RegexPattern {
+final case class AltPattern(concs: List[ConcPattern]) extends RegexPattern {
 
-  override lazy val alphabet: Set[Char] = concs.flatMap(_.alphabet) + Fsm.anythingElse
+  override lazy val alphabet: Set[Char] = concs.flatMap(_.alphabet).toSet + Fsm.anythingElse
 
   override def hashCode: Int = concs.hashCode
 
   override def equivalent(that: RegexPattern): Boolean = that match {
-    case thatAlt: AltPattern => concs == thatAlt.concs
+    case thatAlt: AltPattern => concs.toSet == thatAlt.concs.toSet
     case _                   => false
   }
 
@@ -833,42 +898,72 @@ final case class AltPattern(concs: Set[ConcPattern]) extends RegexPattern {
 
   override def negated: RegexPattern = throw new NotImplementedError("TODO")
 
-  override def reversed: AltPattern = AltPattern(concs.map(_.reversed))
+  override def reversed: AltPattern = AltPattern(concs.map(_.reversed).reverse)
+
+  override def toString(): String =
+    if (concs.nonEmpty) {
+      concs.mkString("|")
+    } else {
+      ""
+    }
+
+  override protected[regex] def preOrderSequence: Iterator[RegexPattern] =
+    Iterator(this) ++ concs.flatMap(_.preOrderSequence)
+}
+
+private[regex] object MultKind extends Enumeration {
+  val capturing, nonCapturing, suffixNonCapturing = Value
 }
 
 object MultPattern extends ParsedPattern {
   def tryParse(str: CharSequence): Option[(MultPattern, Int)] = {
-    //matches single charclass or unnamed group (...)
-    def matchMultiplicand(startIndex: Int): Option[(RegexPattern, Int)] =
-      if (startIndex < str.length) {
-        str.charAt(startIndex) match {
-          case '(' => {
-            //parse unnamed group
-            val parsedAltPattern =
-              AltPattern.tryParse(str.subSequence(startIndex + 1, str.length))
-            parsedAltPattern.flatMap {
-              case (altPattern, altInnerEndIndex) => {
-                val altEndIndex = startIndex + 1 + altInnerEndIndex
-                if ((altEndIndex < str.length) && (str.charAt(altEndIndex) == ')')) {
-                  //we found closing bracket, group finished
-                  Some(altPattern.asInstanceOf[RegexPattern], altEndIndex + 1)
-                } else {
-                  None
-                }
-              }
-            }
+
+    def parseAlt(altStartIndex: Int): Option[(RegexPattern, Int)] = {
+      val parsedAltPattern =
+        AltPattern.tryParse(str.subSequence(altStartIndex, str.length))
+      parsedAltPattern match {
+        case Some((altPattern, altInnerEndIndex)) => {
+          val altEndIndex = altStartIndex + altInnerEndIndex
+          if ((altEndIndex < str.length) && (str.charAt(altEndIndex) == ')')) {
+            //we found closing bracket, group finished
+            Some(altPattern.asInstanceOf[RegexPattern], altEndIndex + 1)
+          } else {
+            None
           }
-          case _ => CharClassPattern.tryParse(str.subSequence(startIndex, str.length))
         }
-      } else {
-        None
+        case None if altStartIndex < str.length() && str.charAt(altStartIndex) == ')' =>
+          Some(AltPattern(Nil), altStartIndex + 1)
+        case _ => None
+      }
+    }
+
+    //matches single charclass or unnamed group (...)
+    def matchMultiplicand(startIndex: Int): Option[((RegexPattern, Int), MultKind.Value)] =
+      (for (i <- startIndex until math.min(str.length(), startIndex + 2))
+        yield str.charAt(i)).toList match {
+        case '(' :: '?' :: ':' :: _ => {
+          //non-capturing group
+          parseAlt(startIndex + 3).map((_, MultKind.nonCapturing))
+        }
+        case '(' :: '?' :: '=' :: _ => {
+          //non-capturing suffix
+          parseAlt(startIndex + 3).map((_, MultKind.suffixNonCapturing))
+        }
+        case '(' :: _ => {
+          //unnamed capturing group
+          parseAlt(startIndex + 1).map((_, MultKind.capturing))
+        }
+        case _ =>
+          CharClassPattern
+            .tryParse(str.subSequence(startIndex, str.length))
+            .map((_, MultKind.nonCapturing))
       }
 
     matchMultiplicand(0).flatMap {
-      case (multiplicandPattern, multiplicandEndIndex) => {
+      case ((multiplicandPattern, multiplicandEndIndex), kind) => {
         val (multiplier, multiplierEndIndex) =
           Multiplier.tryParse(str.subSequence(multiplicandEndIndex, str.length))
-        Some(MultPattern(multiplicandPattern, multiplier),
+        Some(MultPattern(multiplicandPattern, multiplier, kind),
              multiplicandEndIndex + multiplierEndIndex)
       }
     }
@@ -883,7 +978,9 @@ object MultPattern extends ParsedPattern {
   * multipliers like "*" (min = 0, max = inf) and so on.
   * e.g. a, b{2}, c?, d*, [efg]{2,5}, f{2,}, (anysubpattern)+, .*, and so on
   */
-final case class MultPattern(multiplicand: RegexPattern, multiplier: Multiplier)
+final case class MultPattern(multiplicand: RegexPattern,
+                             multiplier: Multiplier,
+                             kind: MultKind.Value = MultKind.nonCapturing)
     extends RegexPattern {
 
   override lazy val alphabet: Set[Char] = multiplicand.alphabet + Fsm.anythingElse
@@ -899,7 +996,7 @@ final case class MultPattern(multiplicand: RegexPattern, multiplier: Multiplier)
     if (nextMultiplier.isOne)
       this
     else if (multiplier.canMultiplyBy(nextMultiplier))
-      MultPattern(multiplicand, multiplier * nextMultiplier)
+      MultPattern(multiplicand, multiplier * nextMultiplier, kind)
     else
       MultPattern(AltPattern(ConcPattern(this)), multiplier)
 
@@ -925,20 +1022,109 @@ final case class MultPattern(multiplicand: RegexPattern, multiplier: Multiplier)
 
   override def reversed: MultPattern = MultPattern(multiplicand.reversed, multiplier)
 
+  case class captureGroupImp() {
+    def startCaptureGroup(charIndex: Int): Option[Int] =
+      None
+
+    def endCaptureGroup(charIndex: Int): Option[Int] =
+      None
+  }
+
+  private[this] def enterCaptureGroupFun(matchData: MatchData,
+                                         charIndex: Int): (MatchData, Option[Int]) =
+    if (matchData.isInstanceOf[PatternMatchData]) {
+      val captureIndex = matchData.matchGroups(this)
+      if (matchData.inProgress.contains(captureIndex)) {
+        //simply can't be, like div/0
+        throw new Error("Capture group recursion detected")
+      }
+
+      (PatternMatchData(
+         matchData.input,
+         matchData.version + 1,
+         matchData.captures,
+         matchData.inProgress + (captureIndex -> PendingCapture(charIndex, matchData)),
+         matchData.matchGroups),
+       None)
+    } else {
+      (matchData, None)
+    }
+
+  private[this] def completeCaptureGroupFun(matchData: MatchData,
+                                            charIndex: Int): (MatchData, Option[Int]) =
+    if (matchData.isInstanceOf[PatternMatchData]) {
+      val captureIndex = matchData.matchGroups(this)
+      if (matchData.inProgress.contains(captureIndex)) {
+
+        val currentCaptureGroup = matchData.inProgress(captureIndex)
+        val captureValue        = matchData.input.substring(currentCaptureGroup.index, charIndex)
+        val capture             = Capture(captureValue, currentCaptureGroup.index)
+
+        val newCaptureGroup = matchData.captures
+          .get(captureIndex)
+          .map(oldCaptureGroup => CaptureGroup(oldCaptureGroup.captures ++ List(capture)))
+          .getOrElse(CaptureGroup(List(capture)))
+
+        (PatternMatchData(matchData.input,
+                          matchData.version + 1,
+                          matchData.captures + (captureIndex -> newCaptureGroup),
+                          matchData.inProgress - captureIndex,
+                          matchData.matchGroups),
+         None)
+      } else {
+        (matchData, None)
+      }
+    } else {
+      (matchData, None)
+    }
+
+  private[this] def cancelCaptureGroupFun(matchData: MatchData,
+                                          charIndex: Int): (MatchData, Option[Int]) =
+    if (matchData.isInstanceOf[PatternMatchData]) {
+      val captureIndex = matchData.matchGroups(this)
+      matchData.inProgress
+        .get(captureIndex)
+        .map(pc => {
+          if (pc.rollBack.version < matchData.version) {
+            (pc.rollBack, None)
+          } else {
+            (matchData, None)
+          }
+        })
+        .getOrElse((matchData, None))
+    } else {
+      (matchData, None)
+    }
+
+  lazy val enterCaptureGroup = TransitionAction(StateActionType.enterGroup, enterCaptureGroupFun)
+  lazy val completeCaptureGroup =
+		TransitionAction(StateActionType.completeGroup, completeCaptureGroupFun)
+  lazy val cancelCaptureGroup = TransitionAction(StateActionType.cancelGroup, cancelCaptureGroupFun)
+
   override def toFsm(alphabet: Option[Set[Char]]): Fsm = {
     val actualAlphabet = alphabet.getOrElse(this.alphabet)
 
     val startFsm = multiplicand.toFsm(actualAlphabet)
-    //accepts e.g. "ab"
-    val mandatoryFsm = startFsm * multiplier.mandatory.getOrElse(0)
-    //unlimited additional copies
-    val optionalFsm = if (multiplier.optional == Multiplier.Inf) {
-      startFsm.star
+    val taggedStartFsm = if (kind == MultKind.capturing) {
+      startFsm.bindActions(enterCaptureGroup, completeCaptureGroup, cancelCaptureGroup)
     } else {
-      (Fsm.epsilonFsm(actualAlphabet) | startFsm) * multiplier.optional.get
+      startFsm
     }
 
-    mandatoryFsm + optionalFsm
+    if (multiplier.isOne) {
+      taggedStartFsm
+    } else {
+      //accepts e.g. "ab"
+      val mandatoryFsm = taggedStartFsm * multiplier.mandatory.getOrElse(0)
+      //unlimited additional copies
+      val optionalFsm = if (multiplier.optional == Multiplier.Inf) {
+        taggedStartFsm.star
+      } else {
+        (Fsm.epsilonFsm(actualAlphabet) | taggedStartFsm) * multiplier.optional.get
+      }
+
+      mandatoryFsm + optionalFsm
+    }
   }
 
   override def reduced: RegexPattern = throw new NotImplementedError("TODO")
@@ -958,4 +1144,22 @@ final case class MultPattern(multiplicand: RegexPattern, multiplier: Multiplier)
       //Multiplicands disagree, no common part at all.
       MultPattern(RegexPattern.nothing, Multiplier.presetZero)
     }
+
+  override def toString: String =
+    ((multiplicand, kind) match {
+      case (any, MultKind.capturing)          => s"(${any.toString})"
+      case (any, MultKind.suffixNonCapturing) => s"(?=${any.toString})"
+
+      case (alt: AltPattern, MultKind.nonCapturing) if alt.concs.size > 1    => s"(?:$alt)"
+      case (conc: ConcPattern, MultKind.nonCapturing) if conc.mults.size > 1 => s"(?:$conc)"
+      //includes CharClass and Alt|Conc with single argument
+      case (other, _) =>
+        other.toString match {
+          case "" => "()"
+          case s  => s
+        }
+    }) + multiplier.toString()
+
+  override protected[regex] def preOrderSequence: Iterator[RegexPattern] =
+    Iterator(this) ++ multiplicand.preOrderSequence
 }
