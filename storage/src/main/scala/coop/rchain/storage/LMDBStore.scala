@@ -77,8 +77,14 @@ class LMDBStore[C, P, A, K] private (env: Env[ByteBuffer],
   def removeA(txn: T, channel: C, index: Int): Unit = {
     val keyCs = hashCs(List(channel))
     Option(_dbAs.get(txn, keyCs)).map(fromByteBuffer[A]) match {
-      case Some(as) => _dbAs.put(txn, keyCs, toByteBuffer(util.dropIndex(as, index)))
-      case None     => throw new IllegalArgumentException(s"removeA: no values at $channel")
+      case Some(as) =>
+        val newAs = util.dropIndex(as, index)
+        if (newAs.nonEmpty) {
+          _dbAs.put(txn, keyCs, toByteBuffer(newAs))
+        } else {
+          _dbAs.delete(txn, keyCs)
+        }
+      case None => throw new IllegalArgumentException(s"removeA: no values at $channel")
     }
   }
 
@@ -91,12 +97,15 @@ class LMDBStore[C, P, A, K] private (env: Env[ByteBuffer],
       PsKsBytesList.parseFrom(fetched).values.toList
     })
 
-  private[this] def writePsKsBytesList(txn: T, keyCs: H, values: List[PsKsBytes]): Unit = {
-    val toWrite        = PsKsBytesList().withValues(values).toByteArray
-    val bb: ByteBuffer = ByteBuffer.allocateDirect(toWrite.length)
-    bb.put(toWrite).flip()
-    _dbPsKs.put(txn, keyCs, bb)
-  }
+  private[this] def writePsKsBytesList(txn: T, keyCs: H, values: List[PsKsBytes]): Unit =
+    if (values.nonEmpty) {
+      val toWrite        = PsKsBytesList().withValues(values).toByteArray
+      val bb: ByteBuffer = ByteBuffer.allocateDirect(toWrite.length)
+      bb.put(toWrite).flip()
+      _dbPsKs.put(txn, keyCs, bb)
+    } else {
+      _dbPsKs.delete(txn, keyCs)
+    }
 
   def putK(txn: T, channels: List[C], patterns: List[P], k: K): Unit = {
     val keyCs   = putCsH(txn, channels)
