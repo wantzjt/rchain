@@ -38,6 +38,8 @@ object Dependencies {
   val scallop             = "org.rogach"                 %% "scallop"                   % "3.0.3"
   val shapeless           = "com.chuusai"                %% "shapeless"                 % "2.3.2"
   val weupnp              = "org.bitlet"                  % "weupnp"                    % "0.1.+"
+  val scodecCore          = "org.scodec"                 %% "scodec-core"               % "1.10.3"
+  val scodecBits          = "org.scodec"                 %% "scodec-bits"               % "1.1.5"
   // format: on
 
   private val kindProjector = compilerPlugin("org.spire-math" %% "kind-projector" % "0.9.4")

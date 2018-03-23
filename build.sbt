@@ -165,7 +165,9 @@ lazy val storage = (project in file("storage"))
   .settings(
     libraryDependencies ++= commonDependencies ++ protobufDependencies ++ Seq(
       lmdbjava,
-      catsCore
+      catsCore,
+      scodecCore,
+      scodecBits
     ),
     PB.targets in Compile := Seq(
       scalapb.gen(flatPackage = true) -> (sourceManaged in Compile).value

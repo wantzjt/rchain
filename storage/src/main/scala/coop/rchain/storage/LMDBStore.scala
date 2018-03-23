@@ -11,6 +11,8 @@ import coop.rchain.storage.datamodels._
 import coop.rchain.storage.util._
 import org.lmdbjava.DbiFlags.MDB_CREATE
 import org.lmdbjava.{Dbi, Env, Txn}
+import scodec._
+import scodec.bits._
 
 class LMDBStore[C, P, A, K] private (env: Env[ByteBuffer],
                                      _dbKeys: Dbi[ByteBuffer],
@@ -309,6 +311,36 @@ object LMDBStore {
       case Left(err)    => throw new Exception(err)
       case Right(value) => value
     }
+
+  private[storage] def toBytesArray[T](values: List[T])(implicit st: Serialize[T]): Array[Byte] = {
+    val x = Codec[List[Array[Byte]]].encode(values.map(st.encode))
+    x.toEither match {
+      case Right(res) => res.toByteArray
+      case Left(err)  => throw new Exception(err.toString)
+    }
+  }
+
+  private[storage] def fromByteArray[T](values: Array[Byte])(implicit st: Serialize[T]): List[T] = {
+    val z = Codec[List[Array[Byte]]].decode(BitVector(values)).toEither
+    z match {
+      case Right(res) =>
+        res.value
+          .map(x => st.decode(x.toArray))
+          .sequence[Either[Throwable, ?], T] match {
+          case Left(err)     => throw new Exception(err)
+          case Right(values) => values
+        }
+      case Left(err) => throw new Exception(err.toString)
+    }
+//    val x: Either[Throwable, List[T]] = z
+//      .map(x => st.decode(x))
+//      .toList
+//      .sequence[Either[Throwable, ?], T]
+//    x match {
+//      case Left(err)     => throw new Exception(err)
+//      case Right(values) => values
+//    }
+  }
 
   private[storage] def toBytesList[T](values: List[T])(implicit st: Serialize[T]): BytesList =
     BytesList().withValues(values.map(st.encode).map(ByteString.copyFrom))
