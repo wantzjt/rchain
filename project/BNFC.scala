@@ -14,7 +14,7 @@ object BNFC {
   lazy val generateDocs   = taskKey[Unit]("Generates LaTeX files from BNFC grammar files")
 
   def cleanDir(dir: File): Unit =
-    Process(s"rm -rf $dir") !
+    Process(s"C:\\HsPlatform\\msys\\usr\\bin\\rm.exe -rf $dir") !
 
   def nsToPath(ns: String): String =
     ns.replaceAll("\\.", "/")
@@ -26,13 +26,14 @@ object BNFC {
     s"$outputDir/${nsToPath(namespace)}/${stripSuffix(grammarFile.getName)}"
 
   def bnfcGenerateSources(fullClasspath: Seq[Attributed[File]], grammarFile: File, outputDir: File, namespace: String): Unit = {
-    val classpath: String = fullClasspath.map(e => e.data).mkString(":")
+    val cupClasspath: String = "D:\\RChain\\bnfc\\cup\\java-cup-11b.jar"
     val targPath: String  = makeOutputPath(grammarFile, outputDir, namespace)
     val bnfcCmd: String   = s"bnfc -l --java --jflex -o ${outputDir.getAbsolutePath} -p $namespace $grammarFile"
-    val jlexCmd: String   = s"jflex $targPath/Yylex"
-    val renameDefaultCmd: String = s"mv $targPath/_cup.cup $targPath/${stripSuffix(grammarFile.getName)}.cup"
-    val cupCmd: String    = s"java -cp $classpath java_cup.Main -locations -expect 100 $targPath/${stripSuffix(grammarFile.getName)}.cup" // TODO: Figure out naming behind _cup.cup
-    val mvCmd: String     = s"mv sym.java parser.java $targPath"
+    val jlexCmd: String   = s"D:\\RChain\\bnfc\\jflex\\bin\\jflex.bat $targPath/Yylex"
+    val renameDefaultCmd: String = s"C:\\HsPlatform\\msys\\usr\\bin\\mv.exe $targPath/_cup.cup $targPath/${stripSuffix(grammarFile.getName)}.cup"
+    val cupCmd: String    = s"java -cp $cupClasspath java_cup.Main -locations -expect 100 $targPath/${stripSuffix(grammarFile.getName)}.cup" // TODO: Figure out naming behind _cup.cup
+    val mvCmd: String     = s"C:\\HsPlatform\\msys\\usr\\bin\\mv.exe sym.java parser.java $targPath"
+
     Process(bnfcCmd) #&& Process(jlexCmd) #&& Process(renameDefaultCmd) #&& Process(cupCmd) #&& Process(mvCmd) !
   }
 
