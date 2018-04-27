@@ -9,6 +9,7 @@ import coop.rchain.rspace.internal._
 import org.lmdbjava.Txn
 import java.security.MessageDigest
 
+import cats.Monad
 import coop.rchain.rspace.util.ignore
 import coop.rchain.rspace.internal.scodecs._
 import scodec.Codec
@@ -18,7 +19,7 @@ import scala.collection.immutable.Seq
 
 object StoreInstances {
 
-  implicit def storeLMDB[F[_], C, P, A, K](
+  implicit def storeLMDB[F[_]: Monad, C, P, A, K](
       implicit
       serializeC: Serialize[C],
       serializeP: Serialize[P],
@@ -32,10 +33,10 @@ object StoreInstances {
       type T = Txn[ByteBuffer]
 
       def createTxnRead(): ReaderT[F, LMDBContext, Txn[ByteBuffer]] =
-        ReaderT(ctx => capture(ctx.env.txnRead()))
+        ReaderT(ctx => capture(ctx.env.txnRead))
 
       def createTxnWrite(): ReaderT[F, LMDBContext, Txn[ByteBuffer]] =
-        ReaderT(ctx => capture(ctx.env.txnWrite()))
+        ReaderT(ctx => capture(ctx.env.txnWrite))
 
       def withTxn[R](txn: Txn[ByteBuffer])(f: Txn[ByteBuffer] => R): R =
         try {
@@ -53,48 +54,59 @@ object StoreInstances {
       type H = ByteBuffer
 
       override def hashChannels(channels: Seq[C]): ReaderT[F, LMDBContext, ByteBuffer] =
-        ReaderT(_ => capture(hashBytes(toByteBuffer(channels))))
+        ReaderT(_ =>
+          capture {
+            hashBytes(toByteBuffer(channels))
+        })
 
       override def getChannels(txn: Txn[ByteBuffer],
                                channelsHash: ByteBuffer): ReaderT[F, LMDBContext, Seq[C]] =
         ReaderT(ctx =>
-            capture(
-              Option(ctx.dbKeys.get(txn, channelsHash))
-                .map(fromByteBuffer[C])
-                .getOrElse(Seq.empty[C])))
-
-      private[rspace] def putChannels(txn: T, channels: Seq[C]): ReaderT[F, LMDBContext, H] =
-        ReaderT(ctx => {
-          val channelsBytes = toByteBuffer(channels)
-          val channelsHash  = hashBytes(channelsBytes)
-          ctx.dbKeys.put(txn, channelsHash, channelsBytes)
-          capture(channelsHash)
+          capture {
+            Option(ctx.dbKeys.get(txn, channelsHash))
+              .map(fromByteBuffer[C])
+              .getOrElse(Seq.empty[C])
         })
 
-      private[this] def readDatumByteses(txn: T, channelsHash: H): ReaderT[F, LMDBContext, Option[Seq[DatumBytes]]] =
-        ReaderT(ctx => capture(Option(ctx.dbData.get(txn, channelsHash)).map(fromByteBuffer(_, datumBytesesCodec))))
+      private[rspace] def putChannels(txn: T, channels: Seq[C]): ReaderT[F, LMDBContext, H] =
+        ReaderT(ctx =>
+          capture {
+            val channelsBytes = toByteBuffer(channels)
+            val channelsHash  = hashBytes(channelsBytes)
+            ctx.dbKeys.put(txn, channelsHash, channelsBytes)
+            channelsHash
+        })
 
-      private[this] def writeDatumByteses(txn: T, channelsHash: H, values: Seq[DatumBytes]): ReaderT[F, LMDBContext, Unit] = {
-        if (values.nonEmpty) {
-          ReaderT(ctx => {
-            ctx.dbData.put(txn, channelsHash, toByteBuffer(values, datumBytesesCodec))
-            capture(())
-          })
-        } else {
-          ReaderT(ctx => {
-            ctx.dbData.delete(txn, channelsHash)
-            collectGarbage(txn, channelsHash, waitingContinuationsCollected = true)
-            capture(())
-          })
-        }
-      }
+      private[this] def readDatumByteses(
+          txn: T,
+          channelsHash: H): ReaderT[F, LMDBContext, Option[Seq[DatumBytes]]] =
+        ReaderT(ctx =>
+          capture {
+            Option(ctx.dbData.get(txn, channelsHash)).map(fromByteBuffer(_, datumBytesesCodec))
+        })
 
-      override def getData(txn: T, channels: Seq[C]): ReaderT[F, LMDBContext, Seq[Datum[A]]] = {
-        hashChannels(channels).flatMap(channelsHash => readDatumByteses(txn, channelsHash))
-          .map(datumByteses =>
-            datumByteses.map(_.map(bytes => Datum(fromByteVector[A](bytes.datumBytes), bytes.persist)))
-              .getOrElse(Seq.empty[Datum[A]]))
-      }
+      private[this] def writeDatumByteses(txn: T,
+                                          channelsHash: H,
+                                          values: Seq[DatumBytes]): ReaderT[F, LMDBContext, Unit] =
+        ReaderT(ctx =>
+          capture {
+            if (values.nonEmpty) {
+              ctx.dbData.put(txn, channelsHash, toByteBuffer(values, datumBytesesCodec))
+            } else {
+              ctx.dbData.delete(txn, channelsHash)
+              collectGarbage(txn, channelsHash, waitingContinuationsCollected = true)
+            }
+            ()
+        })
+
+      override def getData(txn: T, channels: Seq[C]): ReaderT[F, LMDBContext, Seq[Datum[A]]] =
+        hashChannels(channels)
+          .flatMap(channelsHash => readDatumByteses(txn, channelsHash))
+          .map(
+            datumByteses =>
+              datumByteses
+                .map(_.map(bytes => Datum(fromByteVector[A](bytes.datumBytes), bytes.persist)))
+                .getOrElse(Seq.empty[Datum[A]]))
 
       override def putDatum(txn: T,
                             channels: Seq[C],
