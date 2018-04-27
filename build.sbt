@@ -221,6 +221,7 @@ lazy val rspace = (project in file("rspace"))
     name := "rspace",
     version := "0.1.1",
     libraryDependencies ++= commonDependencies ++ Seq(
+      shared,
       lmdbjava,
       catsCore,
       scodecCore,
