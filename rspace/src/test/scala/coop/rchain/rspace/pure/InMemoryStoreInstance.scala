@@ -17,9 +17,7 @@ import coop.rchain.rspace.util.dropIndex
 import scala.collection.immutable.Seq
 import scala.collection.mutable
 
-class InMemoryStoreInstance {
-
-  import InMemoryStoreInstance._
+object InMemoryStoreInstance {
 
   class InMemoryContext[C, P, A, K] {
     private[rspace] val lock = new StampedLock()
@@ -37,10 +35,16 @@ class InMemoryStoreInstance {
       serializeC: Serialize[C],
       captureF: Capture[F],
       monadF: Monad[F]
-  ): Store[ReaderT[F, InMemoryContext[C, P, A, K], ?], C, P, A, K] = {
+  ): Store[ReaderT[F, InMemoryContext[C, P, A, K], ?], C, P, A, K] with ITestableStore[
+    ReaderT[F, InMemoryContext[C, P, A, K], ?],
+    C,
+    P] = {
     type InMemoryCtx = InMemoryContext[C, P, A, K]
 
-    new Store[ReaderT[F, InMemoryCtx, ?], C, P, A, K] {
+    class InMemoryStore
+        extends Store[ReaderT[F, InMemoryCtx, ?], C, P, A, K]
+        with ITestableStore[ReaderT[F, InMemoryCtx, ?], C, P] {
+
       private[this] def capture[X](x: X): F[X] = captureF.capture(x)
 
       override type H = String
@@ -219,7 +223,7 @@ class InMemoryStoreInstance {
 
       def close(): ReaderT[F, InMemoryCtx, Unit] = ReaderT.pure(())
 
-      private[rspace] def clear(): ReaderT[F, InMemoryCtx, Unit] =
+      def clear(): ReaderT[F, InMemoryCtx, Unit] =
         createTxnWrite().flatMap { txn =>
           withTxn(txn) { _ =>
             ReaderT { ctx =>
@@ -253,11 +257,36 @@ class InMemoryStoreInstance {
           ctx._keys.remove(channelsHash)
         }
       }
-    }
-  }
-}
 
-object InMemoryStoreInstance {
+      def isEmpty: ReaderT[F, InMemoryCtx, Boolean] =
+        createTxnRead().flatMap { txn =>
+          withTxn(txn) { _ =>
+            isEmpty(txn)
+          }
+        }
+
+      def isEmpty(txn: T): ReaderT[F, InMemoryCtx, Boolean] =
+        ReaderT { ctx =>
+          capture {
+            ctx._waitingContinuations.isEmpty &&
+            ctx._data.isEmpty &&
+            ctx._keys.isEmpty &&
+            ctx._joinMap.isEmpty
+          }
+        }
+
+      def getPatterns(txn: T, channels: Seq[C]): ReaderT[F, InMemoryCtx, Seq[Seq[P]]] =
+        ReaderT { ctx =>
+          capture {
+            val channelsHash = hashChannelsInner(channels)
+            ctx._waitingContinuations.getOrElse(channelsHash, Nil).map(_.patterns)
+          }
+        }
+    }
+
+    new InMemoryStore
+  }
+
   def hashBytes(bs: Array[Byte]): Array[Byte] =
     MessageDigest.getInstance("SHA-256").digest(bs)
 
