@@ -23,7 +23,7 @@ trait Store[F[_], C, P, A, K] {
 
   def createTxnWrite(): F[T]
 
-  def withTxn[R](txn: T)(f: T => R): R
+  def withTxn[R](txn: T)(f: T => F[R]): F[R]
 
   /**
     * The type of hashes

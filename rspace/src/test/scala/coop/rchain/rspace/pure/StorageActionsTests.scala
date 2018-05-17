@@ -7,6 +7,7 @@ import cats.implicits._
 import cats.{Id, Monad}
 import com.typesafe.scalalogging.Logger
 import coop.rchain.catscontrib.Capture
+import coop.rchain.rspace.examples.StringExamples
 import org.scalatest._
 import coop.rchain.rspace.pure.rspace._
 import coop.rchain.rspace.extended._
@@ -37,6 +38,8 @@ abstract class StorageTestsBase[F[_], CTX] extends FlatSpec with Matchers with O
 
   implicit val captureF: Capture[F]
 
+  def createStore: TStore
+
   def consume(channels: Seq[String],
               patterns: Seq[Pattern],
               continuation: StringsCaptor,
@@ -51,8 +54,6 @@ abstract class StorageTestsBase[F[_], CTX] extends FlatSpec with Matchers with O
     logger.debug(s"Test: ${test.name}")
     super.withFixture(test)
   }
-
-  def createStore: TStore
 
   def withTestMany(f: TStore => Seq[ReaderT[F, CTX, _]]): Unit = {
     val store = createStore
@@ -91,23 +92,25 @@ abstract class StorageTestsBase[F[_], CTX] extends FlatSpec with Matchers with O
     "persist a piece of data in the store" in withTest { implicit store =>
     val key = List("ch1")
 
-    for {
-      r       <- produce(key.head, "datum", persist = false)
-      keyHash <- store.hashChannels(key)
-      txn     <- store.createTxnRead()
-    } yield {
-      r shouldBe None
-
-      store.withTxn(txn) { txn =>
-        store.getChannels(txn, keyHash).map(_ shouldBe key)
-        store.getPatterns(txn, key).map(_ shouldBe Nil)
-        store.getData(txn, key).map(_ shouldBe List(Datum("datum", persist = false)))
-        store.getWaitingContinuation(txn, key).map(_ shouldBe Nil)
-
-        //store is not empty - we have 'A' stored
-        store.isEmpty(txn).map(_ shouldBe false)
+    def check(r: Option[(StringExamples.StringsCaptor, Seq[String])]): ReaderT[F, CTX, Unit] =
+      store.createTxnRead().flatMap { txn =>
+        store.withTxn(txn) { txn =>
+          for {
+            keyHash <- store.hashChannels(key)
+            _       <- store.getChannels(txn, keyHash).map(_ shouldBe key)
+            _       <- store.getPatterns(txn, key).map(_ shouldBe Nil)
+            _       <- store.getData(txn, key).map(_ shouldBe List(Datum("datum", persist = false)))
+            _       <- store.getWaitingContinuation(txn, key).map(_ shouldBe Nil)
+            _       <- store.isEmpty(txn).map(_ shouldBe false)
+            _       <- ReaderT.pure[F, CTX, Assertion](r shouldBe None)
+          } yield ()
+        }
       }
-    }
+
+    for {
+      r <- produce(key.head, "datum", persist = false)
+      _ <- check(r)
+    } yield ()
   }
 
   "producing twice on the same channel" should
@@ -275,7 +278,7 @@ abstract class StorageTestsBase[F[_], CTX] extends FlatSpec with Matchers with O
         getK(r6).results should contain oneOf (List("datum1"), List("datum2"), List("datum3"))
 
         store.withTxn(txn) { txn =>
-          store.isEmpty(txn) shouldBe true
+          store.isEmpty(txn).map(_ shouldBe true)
         }
       }
   }
@@ -348,7 +351,7 @@ abstract class StorageTestsBase[F[_], CTX] extends FlatSpec with Matchers with O
         store.getPatterns(txn, produceKey2).map(_ shouldBe Nil)
         store.getData(txn, produceKey2).map(_ shouldBe Nil)
         store.getWaitingContinuation(txn, produceKey2).map(_ shouldBe Nil)
-        store.isEmpty(txn) shouldBe true
+        store.isEmpty(txn).map(_ shouldBe true)
       }
     }
 

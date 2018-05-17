@@ -47,17 +47,19 @@ object StoreInstances {
       def createTxnWrite(): ReaderT[F, LMDBContext, T] =
         ReaderT(ctx => capture(ctx.env.txnWrite))
 
-      def withTxn[R](txn: T)(f: T => R): R =
-        try {
-          val ret: R = f(txn)
-          txn.commit()
-          ret
-        } catch {
-          case ex: Throwable =>
-            txn.abort()
-            throw ex
-        } finally {
-          txn.close()
+      def withTxn[R](txn: T)(f: T => ReaderT[F, LMDBContext, R]): ReaderT[F, LMDBContext, R] =
+        ReaderT[F, LMDBContext, R] { ctx =>
+          try {
+            val ret = f(txn).run(ctx)
+            txn.commit()
+            ret
+          } catch {
+            case ex: Throwable =>
+              txn.abort()
+              throw ex
+          } finally {
+            txn.close()
+          }
         }
 
       type H = ByteBuffer

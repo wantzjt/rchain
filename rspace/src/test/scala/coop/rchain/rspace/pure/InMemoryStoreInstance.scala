@@ -57,12 +57,14 @@ object InMemoryStoreInstance {
       override def createTxnWrite(): ReaderT[F, InMemoryCtx, T] =
         ReaderT(ctx => capture((ctx, ctx.lock.writeLock())))
 
-      override def withTxn[R](txn: T)(f: T => R): R =
-        try {
-          f(txn)
-        } finally {
-          val (ctx, value) = txn
-          ctx.lock.unlock(value)
+      override def withTxn[R](txn: T)(
+          f: T => ReaderT[F, InMemoryCtx, R]): ReaderT[F, InMemoryCtx, R] =
+        ReaderT[F, InMemoryCtx, R] { ctx =>
+          try {
+            f(txn).run(ctx)
+          } finally {
+            ctx.lock.unlock(txn._2)
+          }
         }
 
       private[this] def hashChannelsInner(channels: Seq[C]): H =
