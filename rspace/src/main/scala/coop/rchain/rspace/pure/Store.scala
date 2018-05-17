@@ -73,4 +73,11 @@ trait Store[F[_], C, P, A, K] {
   /* Lifecycle */
 
   def close(): F[Unit]
+
+  /* Private, just for unit-testing */
+  private[rspace] def getPatterns(txn: T, channels: Seq[C]): F[Seq[Seq[P]]]
+
+  private[rspace] def isEmpty(txn: T): F[Boolean]
+
+  private[rspace] def clear(): F[Unit]
 }

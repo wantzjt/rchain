@@ -22,11 +22,7 @@ import scala.collection.immutable.Seq
 import scala.reflect.ClassTag
 
 abstract class StorageTestsBase[F[_], CTX] extends FlatSpec with Matchers with OptionValues {
-  type TStore =
-    Store[ReaderT[F, CTX, ?], String, Pattern, String, StringsCaptor] with ITestableStore[
-      ReaderT[F, CTX, ?],
-      String,
-      Pattern]
+  type TStore = Store[ReaderT[F, CTX, ?], String, Pattern, String, StringsCaptor]
 
   type TCTX = CTX
 

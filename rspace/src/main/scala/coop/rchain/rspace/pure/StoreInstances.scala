@@ -22,20 +22,15 @@ import coop.rchain.rspace.util
 import scala.collection.JavaConverters._
 
 object StoreInstances {
-  implicit def storeLMDB[F[_], C, P, A, K](implicit
-                                           serializeC: Serialize[C],
-                                           serializeP: Serialize[P],
-                                           serializeA: Serialize[A],
-                                           serializeK: Serialize[K],
-                                           captureF: Capture[F],
-                                           monadF: Monad[F])
-    : Store[ReaderT[F, LMDBContext, ?], C, P, A, K] with ITestableStore[ReaderT[F, LMDBContext, ?],
-                                                                        C,
-                                                                        P] = {
-
-    class LMDBStore
-        extends Store[ReaderT[F, LMDBContext, ?], C, P, A, K]
-        with ITestableStore[ReaderT[F, LMDBContext, ?], C, P] {
+  implicit def storeLMDB[F[_], C, P, A, K](
+      implicit
+      serializeC: Serialize[C],
+      serializeP: Serialize[P],
+      serializeA: Serialize[A],
+      serializeK: Serialize[K],
+      captureF: Capture[F],
+      monadF: Monad[F]): Store[ReaderT[F, LMDBContext, ?], C, P, A, K] =
+    new Store[ReaderT[F, LMDBContext, ?], C, P, A, K] {
 
       private[this] def capture[X](x: X): F[X] = captureF.capture(x)
 
@@ -336,7 +331,9 @@ object StoreInstances {
 
       def close(): ReaderT[F, LMDBContext, Unit] =
         ReaderT { ctx =>
-          capture { ctx.close() }
+          capture {
+            ctx.close()
+          }
         }
 
       def clear(): ReaderT[F, LMDBContext, Unit] =
@@ -378,9 +375,6 @@ object StoreInstances {
                          waitingContinuationsCollected: Boolean = false,
                          joinsCollected: Boolean = false): Unit = {}
     }
-
-    new LMDBStore
-  }
 
   private[rspace] def toByteVector[T](value: T)(implicit st: Serialize[T]): ByteVector =
     ByteVector(st.encode(value))

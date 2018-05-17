@@ -35,15 +35,10 @@ object InMemoryStoreInstance {
       serializeC: Serialize[C],
       captureF: Capture[F],
       monadF: Monad[F]
-  ): Store[ReaderT[F, InMemoryContext[C, P, A, K], ?], C, P, A, K] with ITestableStore[
-    ReaderT[F, InMemoryContext[C, P, A, K], ?],
-    C,
-    P] = {
+  ): Store[ReaderT[F, InMemoryContext[C, P, A, K], ?], C, P, A, K] = {
     type InMemoryCtx = InMemoryContext[C, P, A, K]
 
-    class InMemoryStore
-        extends Store[ReaderT[F, InMemoryCtx, ?], C, P, A, K]
-        with ITestableStore[ReaderT[F, InMemoryCtx, ?], C, P] {
+    new Store[ReaderT[F, InMemoryCtx, ?], C, P, A, K] {
 
       private[this] def capture[X](x: X): F[X] = captureF.capture(x)
 
@@ -285,8 +280,6 @@ object InMemoryStoreInstance {
           }
         }
     }
-
-    new InMemoryStore
   }
 
   def hashBytes(bs: Array[Byte]): Array[Byte] =

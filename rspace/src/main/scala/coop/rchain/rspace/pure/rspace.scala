@@ -335,33 +335,37 @@ package object rspace {
           extractProduceCandidate(groupedChannels, channel, Datum(data, persist))
         }
 
-        produceCandidate.flatten.map {
-          case Some(
-              ProduceCandidate(channels,
-                               WaitingContinuation(_, continuation, persistK),
-                               continuationIndex,
-                               dataCandidates)) =>
-            if (!persistK) {
-              store.removeWaitingContinuation(txn, channels, continuationIndex)
-            }
-            dataCandidates
-              .sortBy(_.datumIndex)(Ordering[Int].reverse)
-              .foreach {
-                case DataCandidate(candidateChannel, Datum(_, persistData), dataIndex) =>
-                  if (!persistData && dataIndex >= 0) {
-                    store.removeDatum(txn, candidateChannel, dataIndex)
-                  }
-                  store.removeJoin(txn, candidateChannel, channels)
-                case _ =>
-                  ()
+        for {
+          candidate <- produceCandidate.flatten
+        } yield {
+          candidate match {
+            case Some(
+                ProduceCandidate(channels,
+                                 WaitingContinuation(_, continuation, persistK),
+                                 continuationIndex,
+                                 dataCandidates)) =>
+              if (!persistK) {
+                store.removeWaitingContinuation(txn, channels, continuationIndex)
               }
-            logger.debug(s"produce: matching continuation found at <channels: $channels>")
-            Some(continuation, dataCandidates.map(_.datum.a))
-          case None =>
-            logger.debug(s"produce: no matching continuation found")
-            store.putDatum(txn, Seq(channel), Datum(data, persist))
-            logger.debug(s"produce: persisted <data: $data> at <channel: $channel>")
-            None
+              dataCandidates
+                .sortBy(_.datumIndex)(Ordering[Int].reverse)
+                .foreach {
+                  case DataCandidate(candidateChannel, Datum(_, persistData), dataIndex) =>
+                    if (!persistData && dataIndex >= 0) {
+                      store.removeDatum(txn, candidateChannel, dataIndex)
+                    }
+                    store.removeJoin(txn, candidateChannel, channels)
+                  case _ =>
+                    ()
+                }
+              logger.debug(s"produce: matching continuation found at <channels: $channels>")
+              Some(continuation, dataCandidates.map(_.datum.a))
+            case None =>
+              logger.debug(s"produce: no matching continuation found")
+              for { _ <- store.putDatum(txn, Seq(channel), Datum(data, persist)) } yield ()
+              logger.debug(s"produce: persisted <data: $data> at <channel: $channel>")
+              None
+          }
         }
       }
     }
