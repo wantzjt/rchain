@@ -5,6 +5,7 @@ import cats.{Applicative, Parallel, Eval => _}
 import com.google.protobuf.ByteString
 import coop.rchain.catscontrib.Capture
 import coop.rchain.crypto.codec.Base16
+import coop.rchain.metrics.Metrics
 import coop.rchain.models.Channel.ChannelInstance.{ChanVar, Quote}
 import coop.rchain.models.Expr.ExprInstance._
 import coop.rchain.models.TaggedContinuation.TaggedCont.ParBody
@@ -48,7 +49,7 @@ trait Reduce[M[_]] {
 
 object Reduce {
 
-  class DebruijnInterpreter[M[_]: InterpreterErrorsM: Capture, F[_]](
+  class DebruijnInterpreter[M[_]: InterpreterErrorsM: Capture: Metrics, F[_]](
       tupleSpace: IStore[Channel, BindPattern, Seq[Channel], TaggedContinuation],
       dispatcher: => Dispatch[M, Seq[Channel], TaggedContinuation])(
       implicit parallel: cats.Parallel[M, F])

@@ -2,6 +2,7 @@ package coop.rchain.rholang.interpreter
 
 import cats.Parallel
 import coop.rchain.catscontrib.Capture
+import coop.rchain.metrics.Metrics
 import coop.rchain.models.Channel.ChannelInstance.Quote
 import coop.rchain.models.TaggedContinuation.TaggedCont.{Empty, ParBody, ScalaBodyRef}
 import coop.rchain.models.{BindPattern, Channel, Par, TaggedContinuation}
@@ -46,6 +47,7 @@ object RholangOnlyDispatcher {
       implicit
       intepreterErrorsM: InterpreterErrorsM[M],
       captureM: Capture[M],
+      metricsM: Metrics[M],
       parallel: Parallel[M, F]): Dispatch[M, Seq[Channel], TaggedContinuation] = {
     lazy val dispatcher: Dispatch[M, Seq[Channel], TaggedContinuation] =
       new RholangOnlyDispatcher(reducer)
@@ -85,6 +87,7 @@ object RholangAndScalaDispatcher {
       implicit
       intepreterErrorsM: InterpreterErrorsM[M],
       captureM: Capture[M],
+      metricsM: Metrics[M],
       parallel: Parallel[M, F]): Dispatch[M, Seq[Channel], TaggedContinuation] = {
     lazy val dispatcher: Dispatch[M, Seq[Channel], TaggedContinuation] =
       new RholangAndScalaDispatcher(reducer, dispatchTable)

@@ -5,6 +5,8 @@ import java.nio.file.Files
 import com.google.protobuf.ByteString
 import coop.rchain.catscontrib.Capture._
 import coop.rchain.crypto.codec.Base16
+import coop.rchain.metrics
+import coop.rchain.metrics.Metrics
 import coop.rchain.models.Channel.ChannelInstance._
 import coop.rchain.models.Expr.ExprInstance._
 import coop.rchain.models.TaggedContinuation.TaggedCont.ParBody
@@ -26,6 +28,9 @@ import scala.concurrent.duration._
 import scala.concurrent.{Await, ExecutionException}
 
 trait PersistentStoreTester {
+
+  implicit val metricsNop: Metrics[Task] = new Metrics.MetricsNOP[Task]()
+
   def withTestStore[R](
       f: IStore[Channel, BindPattern, Seq[Channel], TaggedContinuation] => R): R = {
     val dbDir = Files.createTempDirectory("rchain-storage-test-")

@@ -9,6 +9,7 @@ import cats.{Monad, _}
 import cats.implicits._
 import cats.syntax._
 import coop.rchain.catscontrib.Capture._
+import coop.rchain.metrics.Metrics
 import coop.rchain.models.{BindPattern, Channel, Par, TaggedContinuation}
 import coop.rchain.rholang.interpreter.errors._
 import coop.rchain.rholang.interpreter.implicits.VectorPar
@@ -50,7 +51,8 @@ object RholangCLI {
   def main(args: Array[String]): Unit = {
     import monix.execution.Scheduler.Implicits.global
 
-    val conf = new Conf(args)
+    val conf                               = new Conf(args)
+    implicit val metricsNOP: Metrics[Task] = new Metrics.MetricsNOP[Task]()
 
     val runtime = Runtime.create(conf.data_dir(), conf.map_size())
 

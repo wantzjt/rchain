@@ -10,11 +10,14 @@ import coop.rchain.rholang.interpreter.storage.StoragePrinter
 import java.nio.file.{Files, Path, StandardCopyOption}
 
 import coop.rchain.catscontrib.Capture
+import coop.rchain.metrics.Metrics
+import monix.eval.Task
 import monix.execution.Scheduler
 
 class Tuplespace(val name: String, val location: Path, val size: Long) {
   val dbLocation: Path = location.resolve(name)
-  val runtime: Runtime = Runtime.create(dbLocation, size)(Capture.taskCapture)
+  val runtime: Runtime =
+    Runtime.create(dbLocation, size)(Capture.taskCapture, new Metrics.MetricsNOP[Task]())
 
   def addTerm(term: Par)(implicit scheduler: Scheduler): Unit =
     runtime.reducer.inj(term).unsafeRunSync

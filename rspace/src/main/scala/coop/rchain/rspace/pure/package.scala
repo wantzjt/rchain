@@ -1,10 +1,12 @@
 package coop.rchain.rspace
 
+import cats.Monad
 import coop.rchain.catscontrib.Capture
+import coop.rchain.metrics.Metrics
+import cats.implicits._
 
 import scala.collection.immutable._
-
-import coop.rchain.rspace.{produce => fproduce, consume => fconsume, install => finstall}
+import coop.rchain.rspace.{consume => fconsume, install => finstall, produce => fproduce}
 
 /**
   * Monad wrapper for [[coop.rchain.rspace]] package object (produce/consume/install)
@@ -43,13 +45,23 @@ package object pure {
     * @tparam K A type representing a continuation
     * @return
     */
-  def consume[F[_], C, P, A, K](
-      store: IStore[C, P, A, K],
-      channels: Seq[C],
-      patterns: Seq[P],
-      continuation: K,
-      persist: Boolean)(implicit m: Match[P, A], c: Capture[F]): F[Option[(K, Seq[A])]] =
-    c.capture(fconsume(store, channels, patterns, continuation, persist))
+  def consume[F[_], C, P, A, K](store: IStore[C, P, A, K],
+                                channels: Seq[C],
+                                patterns: Seq[P],
+                                continuation: K,
+                                persist: Boolean)(implicit m: Match[P, A],
+                                                  c: Capture[F],
+                                                  mnd: Monad[F],
+                                                  mcs: Metrics[F]): F[Option[(K, Seq[A])]] =
+    for {
+      _ <- Metrics[F].incrementCounter("rspace-2-consumes-count")
+      capTime <- c.capture {
+                  val nsStart = System.nanoTime()
+                  (fconsume(store, channels, patterns, continuation, persist),
+                   System.nanoTime() - nsStart)
+                }
+      _ <- Metrics[F].record("rspace-2-consume-time", capTime._2)
+    } yield capTime._1
 
   /** Searches the store for a continuation that has patterns that match the given data at the
     * given channel.
@@ -85,8 +97,17 @@ package object pure {
   def produce[F[_], C, P, A, K](store: IStore[C, P, A, K], channel: C, data: A, persist: Boolean)(
       implicit
       m: Match[P, A],
-      c: Capture[F]): F[Option[(K, Seq[A])]] =
-    c.capture(fproduce(store, channel, data, persist))
+      c: Capture[F],
+      mnd: Monad[F],
+      mcs: Metrics[F]): F[Option[(K, Seq[A])]] =
+    for {
+      _ <- Metrics[F].incrementCounter("rspace-2-produces-count")
+      capTime <- c.capture {
+                  val nsStart = System.nanoTime()
+                  (fproduce(store, channel, data, persist), System.nanoTime() - nsStart)
+                }
+      _ <- Metrics[F].record("rspace-2-produce-time", capTime._2)
+    } yield capTime._1
 
   /** Searches the store for data matching all the given patterns at the given channels.
     *

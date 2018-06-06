@@ -7,6 +7,7 @@ import coop.rchain.catscontrib.Capture
 import coop.rchain.crypto.encryption.Curve25519
 import coop.rchain.crypto.hash.{Blake2b256, Keccak256, Sha256}
 import coop.rchain.crypto.signatures.Ed25519
+import coop.rchain.metrics.Metrics
 import coop.rchain.models.Channel.ChannelInstance.{ChanVar, Quote}
 import coop.rchain.models.Expr.ExprInstance.{GBool, GByteArray, GString}
 import coop.rchain.models.Var.VarInstance.Wildcard
@@ -187,7 +188,7 @@ class CryptoChannelsSpec
     val randomInt = scala.util.Random.nextInt
     val dbDir     = Files.createTempDirectory(s"rchain-storage-test-$randomInt")
     val size      = 1024L * 1024 * 1024 //borrowed from other places in the code
-    val runtime   = Runtime.create(dbDir, size)(Capture.taskCapture)
+    val runtime   = Runtime.create(dbDir, size)(Capture.taskCapture, new Metrics.MetricsNOP[Task]())
 
     try {
       test((runtime.reducer, runtime.store))
