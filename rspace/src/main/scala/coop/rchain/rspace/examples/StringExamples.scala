@@ -1,12 +1,13 @@
 package coop.rchain.rspace.examples
 
+import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 
 import coop.rchain.rspace.util._
 import coop.rchain.rspace.{Match, Serialize}
 
 import scala.collection.mutable
-import scala.collection.mutable.ListBuffer
+import scala.collection.mutable.{ArrayBuffer, ListBuffer}
 import scala.collection.immutable.Seq
 
 object StringExamples {
@@ -54,11 +55,12 @@ object StringExamples {
 
     implicit object stringSerialize extends Serialize[String] {
 
-      def encode(a: String): Array[Byte] =
-        a.getBytes(StandardCharsets.UTF_8)
+      def encode(a: String): ArrayBuffer[Byte] =
+        new ArrayBuffer[Byte] ++= a.getBytes(StandardCharsets.UTF_8)
 
-      def decode(bytes: Array[Byte]): Either[Throwable, String] =
-        Right(new String(bytes, StandardCharsets.UTF_8))
+      def decode(bytes: ByteBuffer): Either[Throwable, String] =
+        Right(
+          new String(bytes.array(), bytes.arrayOffset(), bytes.remaining(), StandardCharsets.UTF_8))
     }
 
     implicit val stringClosureSerialize: Serialize[StringsCaptor] =

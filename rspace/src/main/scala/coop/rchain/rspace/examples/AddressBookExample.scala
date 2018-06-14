@@ -1,16 +1,18 @@
 package coop.rchain.rspace.examples
 
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, ObjectInputStream, ObjectOutputStream}
+import java.nio.ByteBuffer
 import java.nio.file.{Files, Path}
 
 import cats.implicits._
 import coop.rchain.rspace._
 import coop.rchain.rspace.history.Branch
 import coop.rchain.rspace.util.{ignore, runKs}
+import coop.rchain.shared.ByteBufferInputStream
 
 import scala.collection.immutable.Seq
 import scala.collection.mutable
-import scala.collection.mutable.ListBuffer
+import scala.collection.mutable.{ArrayBuffer, ListBuffer}
 
 object AddressBookExample {
 
@@ -79,23 +81,25 @@ object AddressBookExample {
       */
     implicit val serializeChannel: Serialize[Channel] = new Serialize[Channel] {
 
-      def encode(channel: Channel): Array[Byte] = {
+      def encode(channel: Channel): ArrayBuffer[Byte] = {
         val baos = new ByteArrayOutputStream()
         try {
           val oos = new ObjectOutputStream(baos)
           try { oos.writeObject(channel) } finally { oos.close() }
-          baos.toByteArray
+          ArrayBuffer[Byte]() ++= baos.toByteArray
         } finally {
           baos.close()
         }
       }
 
-      def decode(bytes: Array[Byte]): Either[Throwable, Channel] =
+      def decode(bytes: ByteBuffer): Either[Throwable, Channel] =
         try {
-          val bais = new ByteArrayInputStream(bytes)
+          val bais = new ByteBufferInputStream(bytes)
           try {
             val ois = new ObjectInputStream(bais)
-            try { Right(ois.readObject.asInstanceOf[Channel]) } finally { ois.close() }
+            try {
+              Right(ois.readObject.asInstanceOf[Channel])
+            } finally { ois.close() }
           } finally {
             bais.close()
           }

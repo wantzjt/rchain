@@ -1,10 +1,14 @@
 package coop.rchain.rspace
 
+import java.nio.ByteBuffer
+
 import scodec.{Attempt, Codec, DecodeResult, Err, SizeBound}
 import scodec.bits.{BitVector, ByteVector}
 import scodec.codecs._
 import scodec.interop.cats._
 import cats.implicits._
+
+import scala.collection.mutable.ArrayBuffer
 
 /**
   * Type class for serializing and deserializing values
@@ -13,9 +17,9 @@ import cats.implicits._
   */
 trait Serialize[A] {
 
-  def encode(a: A): Array[Byte]
+  def encode(a: A): ArrayBuffer[Byte]
 
-  def decode(bytes: Array[Byte]): Either[Throwable, A]
+  def decode(bytes: ByteBuffer): Either[Throwable, A]
 }
 
 object Serialize {
@@ -37,9 +41,11 @@ object Serialize {
         codec
           .decode(bits)
           .flatMap { (value: DecodeResult[ByteVector]) =>
-            Attempt.fromEither(value
-              .traverse[Either[Throwable, ?], A]((vec: ByteVector) => instance.decode(vec.toArray))
-              .leftMap((thw: Throwable) => Err(thw.getMessage)))
+            Attempt.fromEither(
+              value
+                .traverse[Either[Throwable, ?], A]((vec: ByteVector) =>
+                  instance.decode(vec.toByteBuffer))
+                .leftMap((thw: Throwable) => Err(thw.getMessage)))
           }
     }
   }
