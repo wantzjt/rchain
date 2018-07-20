@@ -66,6 +66,13 @@ class LMDBStore[C, P, A, K] private (
     trieInsert(channelsHash, gnat)
   }
 
+  private[this] def insertGNATc(cursor: Cursor[ByteBuffer],
+                                channelsHash: Blake2b256Hash,
+                                gnat: GNAT[C, P, A, K]): Unit = {
+    _dbGNATs.put(cursor, channelsHash, gnat)
+    trieInsert(channelsHash, gnat)
+  }
+
   private def deleteGNAT(txn: Txn[ByteBuffer],
                          channelsHash: Blake2b256Hash,
                          gnat: GNAT[C, P, A, K]): Unit = {
@@ -77,10 +84,19 @@ class LMDBStore[C, P, A, K] private (
                               joinedChannelHash: Blake2b256Hash): Option[Seq[Seq[C]]] =
     _dbJoins.get(txn, joinedChannelHash)(joinCodec)
 
+  private[this] def fetchJoin(cursor: Cursor[ByteBuffer],
+                              joinedChannelHash: Blake2b256Hash): Option[Seq[Seq[C]]] =
+    _dbJoins.get(cursor, joinedChannelHash)(joinCodec)
+
   private[this] def insertJoin(txn: Transaction,
                                joinedChannelHash: Blake2b256Hash,
                                joins: Seq[Seq[C]]): Unit =
     _dbJoins.put(txn, joinedChannelHash, joins)(joinCodec)
+
+  private[this] def insertJoin(cursor: Cursor[ByteBuffer],
+                               joinedChannelHash: Blake2b256Hash,
+                               joins: Seq[Seq[C]]): Unit =
+    _dbJoins.put(cursor, joinedChannelHash, joins)(joinCodec)
 
   private[rspace] def hashChannels(channels: Seq[C]): Blake2b256Hash =
     StableHashProvider.hash(channels)
@@ -205,6 +221,18 @@ class LMDBStore[C, P, A, K] private (
     }
   }
 
+  private[rspace] def addJoin(cursor: Cursor[ByteBuffer], channel: C, channels: Seq[C]): Unit = {
+    val joinedChannelHash = hashChannels(Seq(channel))
+    fetchJoin(cursor, joinedChannelHash) match {
+      case Some(joins) if !joins.contains(channels) =>
+        insertJoin(cursor, joinedChannelHash, channels +: joins)
+      case None =>
+        insertJoin(cursor, joinedChannelHash, Seq(channels))
+      case _ =>
+        ()
+    }
+  }
+
   private[rspace] def removeJoin(txn: Transaction, channel: C, channels: Seq[C]): Unit = {
     val joinedChannelHash = hashChannels(Seq(channel))
     fetchJoin(txn, joinedChannelHash) match {
@@ -273,18 +301,44 @@ class LMDBStore[C, P, A, K] private (
         history.delete(trieStore, trieBranch, channelsHash, canonicalize(gnat))
     }
 
-  // TODO: Does using a cursor improve performance for bulk operations?
+  var bulkInserUseCursors = false
+
   private[rspace] def bulkInsert(txn: Txn[ByteBuffer],
                                  gnats: Seq[(Blake2b256Hash, GNAT[C, P, A, K])]): Unit =
+    if (bulkInserUseCursors)
+      bulkInsertCursors(txn, gnats)
+    else
+      bulkInsertOld(txn, gnats)
+
+  // TODO: Does using a cursor improve performance for bulk operations?
+  private[rspace] def bulkInsertOld(txn: Txn[ByteBuffer],
+                                    gnats: Seq[(Blake2b256Hash, GNAT[C, P, A, K])]): Unit =
     gnats.foreach {
       case (hash, gnat @ GNAT(channels, _, wks)) =>
         insertGNAT(txn, hash, gnat)
         for {
-          wk      <- wks
+          _       <- wks
           channel <- channels
         } {
           addJoin(txn, channel, channels)
         }
+    }
+
+  private[rspace] def bulkInsertCursors(txn: Txn[ByteBuffer],
+                                        gnats: Seq[(Blake2b256Hash, GNAT[C, P, A, K])]): Unit =
+    withResource(_dbJoins.openCursor(txn)) { joinsCursor =>
+      withResource(_dbGNATs.openCursor(txn)) { gnatCursor =>
+        gnats.foreach {
+          case (hash, gnat @ GNAT(channels, _, wks)) =>
+            insertGNATc(gnatCursor, hash, gnat)
+            for {
+              _       <- wks
+              channel <- channels
+            } {
+              addJoin(joinsCursor, channel, channels)
+            }
+        }
+      }
     }
 }
 

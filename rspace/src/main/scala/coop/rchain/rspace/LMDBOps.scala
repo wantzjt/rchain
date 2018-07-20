@@ -3,13 +3,12 @@ package coop.rchain.rspace
 import java.nio.ByteBuffer
 import java.nio.file.Path
 
-import org.lmdbjava.{Dbi, Env, Txn}
+import org.lmdbjava._
 import scodec.Codec
 import coop.rchain.shared.ByteVectorOps._
 import coop.rchain.shared.AttemptOps._
 import coop.rchain.shared.PathOps._
 import scodec.bits.BitVector
-
 import kamon._
 
 trait LMDBOps {
@@ -69,11 +68,26 @@ trait LMDBOps {
           codecV.decode(BitVector(bytes)).map(_.value).get
         }
 
+    def get[V](cursor: Cursor[ByteBuffer], key: Blake2b256Hash)(
+        implicit codecV: Codec[V]): Option[V] =
+      if (cursor.get(key.bytes.toDirectByteBuffer, GetOp.MDB_SET)) {
+        Some(codecV.decode(BitVector(cursor.`val`())).map(_.value).get)
+      } else {
+        None
+      }
+
     def put[V](txn: Txn[ByteBuffer], key: Blake2b256Hash, data: V)(
         implicit codecV: Codec[V]): Unit =
       if (!dbi.put(txn,
                    key.bytes.toDirectByteBuffer,
                    codecV.encode(data).map(_.bytes.toDirectByteBuffer).get)) {
+        throw new Exception(s"could not persist: $data")
+      }
+
+    def put[V](cursor: Cursor[ByteBuffer], key: Blake2b256Hash, data: V)(
+        implicit codecV: Codec[V]): Unit =
+      if (!cursor.put(key.bytes.toDirectByteBuffer,
+                      codecV.encode(data).map(_.bytes.toDirectByteBuffer).get)) {
         throw new Exception(s"could not persist: $data")
       }
 

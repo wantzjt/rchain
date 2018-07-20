@@ -46,11 +46,13 @@ object BasicBench {
     val context: Context[String, Pattern, String, StringsCaptor] =
       Context.create(dbDir, 1024 * 1024 * 1024)
 
+    val testBranch = Branch("bench")
+
     val testStore: LMDBStore[String, Pattern, String, StringsCaptor] =
-      LMDBStore.create[String, Pattern, String, StringsCaptor](context)
+      LMDBStore.create[String, Pattern, String, StringsCaptor](context, testBranch)
 
     val testSpace: RSpace[String, Pattern, String, String, StringsCaptor] =
-      RSpace.create[String, Pattern, String, String, StringsCaptor](testStore, Branch("bench"))
+      RSpace.create[String, Pattern, String, String, StringsCaptor](testStore, testBranch)
 
     @TearDown
     def tearDown() = {
