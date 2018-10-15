@@ -5,7 +5,7 @@ import scala.collection.immutable.{Map => ImmutableMap}
 import scala.collection.immutable.Seq
 import scala.collection.mutable.Map
 
-class TrieCache[T, K, V](trieStore: ITrieStore[T, K, V], trieStoreOwner: Boolean = false) extends  ITrieStore[T, K, V] {
+private[rspace] class TrieCache[T, K, V](trieStore: ITrieStore[T, K, V], trieStoreOwner: Boolean = false) extends  ITrieStore[T, K, V] {
 
   val _dbRoot : Map[Branch, Option[Blake2b256Hash]] = Map.empty
 
@@ -121,6 +121,9 @@ class TrieCache[T, K, V](trieStore: ITrieStore[T, K, V], trieStoreOwner: Boolean
   }
 
   override private[rspace] def toMap: ImmutableMap[Blake2b256Hash, Trie[K, V]] = {
+    trieStore.withTxn(trieStore.createTxnWrite()) {
+      txn => trieStore.applyCache(txn, this)
+    }
     trieStore.toMap
   }
 
@@ -136,4 +139,8 @@ class TrieCache[T, K, V](trieStore: ITrieStore[T, K, V], trieStoreOwner: Boolean
     if(trieStoreOwner)
       trieStore.close()
   }
+
+  override private[rspace] def applyCache(
+      txn: T,
+      trieCache: TrieCache[T, K, V]): Unit = throw new NotImplementedError("Can't apply cache to cache?!")
 }

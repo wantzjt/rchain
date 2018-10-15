@@ -2,10 +2,11 @@ package coop.rchain.rspace
 
 import java.util.concurrent.atomic.AtomicLong
 
-import coop.rchain.rspace.history.{Branch, ITrieStore}
+import coop.rchain.rspace.history.{Branch, ITrieStore, TrieCache}
 import coop.rchain.rspace.internal._
 import coop.rchain.shared.SyncVarOps
 import coop.rchain.shared.SyncVarOps._
+import coop.rchain.rspace.util.canonicalize
 
 import scala.Function.const
 import scala.collection.immutable.Seq
@@ -26,6 +27,8 @@ trait IStore[C, P, A, K] {
   private[rspace] type Transaction
 
   private[rspace] type TrieTransaction
+
+  private[rspace] type TrieStoreType =  ITrieStore[TrieTransaction, Blake2b256Hash, GNAT[C, P, A, K]]
 
   private[rspace] def createTxnRead(): Transaction
 
@@ -80,7 +83,7 @@ trait IStore[C, P, A, K] {
 
   private[rspace] def close(): Unit
 
-  val trieStore: ITrieStore[TrieTransaction, Blake2b256Hash, GNAT[C, P, A, K]]
+  val trieStore: TrieStoreType
 
   val trieBranch: Branch
 
@@ -109,12 +112,12 @@ trait IStore[C, P, A, K] {
   private[rspace] def getTrieUpdateCount: Long =
     _trieUpdateCount.get()
 
-  protected def processTrieUpdate(txn: TrieTransaction, update: TrieUpdate[C, P, A, K]): Unit
-
   private[rspace] def clearTrieUpdates(): Unit = {
     _trieUpdates.update(const(Seq.empty))
     _trieUpdateCount.set(0L)
   }
+
+  protected def processTrieUpdate(cacheStore: TrieStoreType, txn: TrieTransaction, update: TrieUpdate[C, P, A, K]): Unit
 
   def createCheckpoint(): Blake2b256Hash = {
     val trieUpdates = _trieUpdates.take
@@ -122,10 +125,15 @@ trait IStore[C, P, A, K] {
     _trieUpdateCount.set(0L)
     val collapsedUpdates = collapse(trieUpdates)
     trieStore.withTxn(trieStore.createTxnWrite()) { txn =>
-      collapsedUpdates.foreach(processTrieUpdate(txn, _))
-      trieStore
+      val trieCache = new TrieCache(trieStore)
+
+      collapsedUpdates.foreach(processTrieUpdate(trieCache, txn, _))
+      val checkpointHash = trieCache
         .persistAndGetRoot(txn, trieBranch)
         .getOrElse(throw new Exception("Could not get root hash"))
+
+      trieStore.applyCache(txn, trieCache)
+      checkpointHash
     }
   }
 

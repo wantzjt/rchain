@@ -135,6 +135,43 @@ class LMDBTrieStore[K, V] private (
         LMDBTrieStore.emptyRootKey,
         Codec[Blake2b256Hash].encode(hash).map(_.bytes.toDirectByteBuffer).get
       )
+
+  override private[rspace] def applyCache(txn: Txn[ByteBuffer], trieCache:TrieCache[Txn[ByteBuffer], K, V]): Unit = {
+
+    for((branch, hash) <- trieCache._dbRoot) {
+      hash match {
+        case Some(value) =>
+          _dbRoot.put(txn, branch, value)
+        case None =>
+          _dbRoot.delete(txn, branch)
+      }
+    }
+
+    for((hash, trie) <- trieCache._dbTrie) {
+      trie match {
+        case Some(value) =>
+          _dbTrie.put(txn, hash, value)
+        case None =>
+          _dbTrie.delete(txn, hash)
+      }
+    }
+
+    for((branch, pastRoots) <- trieCache._dbPastRoots) {
+      pastRoots match {
+        case Some(value) =>
+          _dbPastRoots.put(txn, branch, value)
+        case None =>
+          _dbPastRoots.delete(txn, branch)
+      }
+    }
+
+    trieCache._dbEmptyRoot match {
+      case Some(value) =>
+        putEmptyRoot(txn, value)
+      case None =>
+        _dbEmptyRoots.delete(txn, LMDBTrieStore.emptyRootKey)
+    }
+  }
 }
 
 object LMDBTrieStore {
