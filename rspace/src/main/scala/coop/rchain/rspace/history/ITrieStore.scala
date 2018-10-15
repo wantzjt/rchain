@@ -20,6 +20,8 @@ trait ITrieStore[T, K, V] {
 
   private[rspace] def persistAndGetRoot(txn: T, branch: Branch): Option[Blake2b256Hash]
 
+  private[rspace] def getPastRootsInBranch(txn: T, branch: Branch): Seq[Blake2b256Hash]
+
   private[rspace] def putRoot(txn: T, branch: Branch, hash: Blake2b256Hash): Unit
 
   private[rspace] def getAllPastRoots(txn: T): Seq[Blake2b256Hash]

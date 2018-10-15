@@ -65,7 +65,7 @@ class InMemoryTrieStore[K, V]
           currentRoot
       }
 
-  private[this] def getPastRootsInBranch(
+  override private[rspace] def getPastRootsInBranch(
       txn: InMemTransaction[State[K, V]],
       branch: Branch
   ): Seq[Blake2b256Hash] =

@@ -92,7 +92,7 @@ class LMDBTrieStore[K, V] private (
       }
     }
 
-  private[this] def getPastRootsInBranch(
+  private[rspace] def getPastRootsInBranch(
       txn: Txn[ByteBuffer],
       branch: Branch
   ): Seq[Blake2b256Hash] =
