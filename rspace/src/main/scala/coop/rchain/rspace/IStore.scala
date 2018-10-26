@@ -120,7 +120,7 @@ trait IStore[C, P, A, K] {
   protected def processTrieUpdate(cacheStore: TrieStoreType, update: TrieUpdate[C, P, A, K]): Unit
 
   protected def processBatchedUpdate(cacheStore: TrieCache[TrieTransaction, Blake2b256Hash, GNAT[C, P, A, K]], updates: Seq[TrieUpdate[C, P, A, K]]) : Unit = {
-    cacheStore.withTxn(cacheStore.createTxnRead()) { txn =>
+    val rootNode = cacheStore.withTxn(cacheStore.createTxnRead()) { txn =>
       val currentRootHash = cacheStore.getRoot(txn, cacheStore.trieBranch).getOrElse(throw new InsertException("could not get root"))
       var currentRootNode = cacheStore.get(txn, currentRootHash).getOrElse(throw new LookupException(s"No node at $currentRootHash"))
 
@@ -131,6 +131,8 @@ trait IStore[C, P, A, K] {
           currentRootNode = history.deleteBatch(cacheStore, txn, currentRootNode, channelsHash, canonicalize(gnat))
       }
     }
+
+    //cacheStore.Apply(rootNode)
   }
 
   def createCheckpoint(): Blake2b256Hash = {
@@ -143,9 +145,7 @@ trait IStore[C, P, A, K] {
 
     val res = if (TrieCache.useCache) {
       val trieCache        = new TrieCache(trieStore, trieBranch)
-      val collapsedUpdates = collapse(trieUpdates)
-
-      collapsedUpdates.foreach(processBatchedUpdate(trieCache, _))
+      processBatchedUpdate(trieCache, collapse(trieUpdates))
       val rootHash = trieCache.withTxn(trieCache.createTxnRead()) { txn =>
         trieCache
           .persistAndGetRoot(txn, trieBranch)

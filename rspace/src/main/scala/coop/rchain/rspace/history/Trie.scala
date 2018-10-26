@@ -10,18 +10,22 @@ import coop.rchain.rspace.internal.codecByteVector
 import scala.ref.WeakReference
 
 sealed trait Pointer
-sealed trait NonEmptyPointer extends Pointer {
+sealed trait NonEmptyPointer extends Pointer
+
+sealed trait HashPointer extends NonEmptyPointer {
   def hash: Blake2b256Hash
 }
 
-case class NodePointer(hash: Blake2b256Hash) extends NonEmptyPointer
-case class LeafPointer(hash: Blake2b256Hash) extends NonEmptyPointer
+case class NodePointer(hash: Blake2b256Hash) extends HashPointer
+case class LeafPointer(hash: Blake2b256Hash) extends HashPointer
 case object EmptyPointer                     extends Pointer
 
 sealed trait Trie[+K, +V]                                          extends HashedEntity with Product with Serializable
 final case class Leaf[K, V](key: K, value: V)                      extends Trie[K, V]
 final case class Node(pointerBlock: PointerBlock)                  extends Trie[Nothing, Nothing]
 final case class Skip(affix: ByteVector, pointer: NonEmptyPointer) extends Trie[Nothing, Nothing]
+
+case class TriePointer[K,V](trie: Trie[K,V]) extends NonEmptyPointer
 
 private[rspace] class HashedEntity {
   private[this] var memoizedData: WeakReference[(Blake2b256Hash, Array[Byte])] = WeakReference(null)
