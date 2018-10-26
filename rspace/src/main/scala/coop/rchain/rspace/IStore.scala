@@ -2,7 +2,7 @@ package coop.rchain.rspace
 
 import java.util.concurrent.atomic.AtomicLong
 
-import coop.rchain.rspace.history.{Branch, ITrieStore, TrieCache}
+import coop.rchain.rspace.history.{Branch, ITrieStore, InsertException, LookupException, TrieCache}
 import coop.rchain.rspace.internal._
 import coop.rchain.shared.SyncVarOps
 import coop.rchain.shared.SyncVarOps._
@@ -119,26 +119,45 @@ trait IStore[C, P, A, K] {
 
   protected def processTrieUpdate(cacheStore: TrieStoreType, update: TrieUpdate[C, P, A, K]): Unit
 
+  protected def processBatchedUpdate(cacheStore: TrieCache[TrieTransaction, Blake2b256Hash, GNAT[C, P, A, K]], updates: Seq[TrieUpdate[C, P, A, K]]) : Unit = {
+    cacheStore.withTxn(cacheStore.createTxnRead()) { txn =>
+      val currentRootHash = cacheStore.getRoot(txn, cacheStore.trieBranch).getOrElse(throw new InsertException("could not get root"))
+      var currentRootNode = cacheStore.get(txn, currentRootHash).getOrElse(throw new LookupException(s"No node at $currentRootHash"))
+
+      for(_ <- updates) {
+        case TrieUpdate(_, Insert, channelsHash, gnat : internal.GNAT[C, P, A, K]) =>
+          currentRootNode = history.insertBatch(cacheStore, txn, currentRootNode, channelsHash, canonicalize(gnat))
+        case TrieUpdate(_, Delete, channelsHash, gnat : internal.GNAT[C, P, A, K]) =>
+          currentRootNode = history.deleteBatch(cacheStore, txn, currentRootNode, channelsHash, canonicalize(gnat))
+      }
+    }
+  }
+
   def createCheckpoint(): Blake2b256Hash = {
     val trieUpdates = _trieUpdates.take
     _trieUpdates.put(Seq.empty)
     _trieUpdateCount.set(0L)
 
-    if (TrieCache.useCache) {
+    val timeStart            = System.nanoTime()
+    var timeInWriteTxn: Long = 0L
+
+    val res = if (TrieCache.useCache) {
       val trieCache        = new TrieCache(trieStore, trieBranch)
       val collapsedUpdates = collapse(trieUpdates)
 
-      collapsedUpdates.foreach(processTrieUpdate(trieCache, _))
+      collapsedUpdates.foreach(processBatchedUpdate(trieCache, _))
       val rootHash = trieCache.withTxn(trieCache.createTxnRead()) { txn =>
         trieCache
           .persistAndGetRoot(txn, trieBranch)
           .getOrElse(throw new Exception("Could not get root hash"))
       }
+      timeInWriteTxn = System.nanoTime()
       trieStore.withTxn(trieStore.createTxnWrite()) { txn =>
         trieStore.applyCache(txn, trieCache, rootHash)
       }
       rootHash
     } else {
+      timeInWriteTxn = System.nanoTime()
       collapse(trieUpdates).foreach(processTrieUpdate(trieStore, _))
       trieStore.withTxn(trieStore.createTxnWrite()) { txn =>
         val rootHash = trieStore
@@ -147,6 +166,12 @@ trait IStore[C, P, A, K] {
         rootHash
       }
     }
+    val timeTotal = (System.nanoTime() - timeStart).asInstanceOf[Double] / 1000000000.0
+    val timeInWriteTxnTotal = (System.nanoTime() - timeInWriteTxn).asInstanceOf[Double] / 1000000000.0
+    println(
+      s"createCheckpoint(), processed ${trieUpdates.length} trie updates, cache=${TrieCache.useCache}, time,sec=$timeTotal; writeTxnTime,sec=$timeInWriteTxnTotal"
+    )
+    res
   }
 
   private[rspace] def collapse(in: Seq[TrieUpdate[C, P, A, K]]): Seq[TrieUpdate[C, P, A, K]] =

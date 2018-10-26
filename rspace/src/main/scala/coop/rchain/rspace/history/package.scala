@@ -187,6 +187,14 @@ package object history {
         (Trie.hash[K, V](node), node)
     }
 
+  def insertBatch[T, K, V](store: ITrieStore[T, K, V], txn: T, root: Trie[K,V], key: K, value: V)(
+    implicit
+    codecK: Codec[K],
+    codecV: Codec[V]
+  ): Trie[K,V] = {
+    ???
+  }
+
   def insert[T, K, V](store: ITrieStore[T, K, V], branch: Branch, key: K, value: V)(
       implicit
       codecK: Codec[K],
@@ -496,6 +504,14 @@ package object history {
           }
       }
     }
+
+  def deleteBatch[T, K, V](store: ITrieStore[T, K, V], txn: T, root: Trie[K,V], key: K, value: V)(
+    implicit
+    codecK: Codec[K],
+    codecV: Codec[V]
+  ): Trie[K,V] = {
+    ???
+  }
 
   import scodec.Codec
   import scodec.codecs._
